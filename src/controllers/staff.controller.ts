@@ -1,0 +1,40 @@
+import { Request, Response } from 'express';
+import { staffService } from '../services/staff.service';
+import { asyncHandler } from '../utils/asyncHandler';
+import { sendSuccess } from '../utils/response';
+import { HTTP_STATUS } from '../constants';
+import { AuthenticatedRequest } from '../types';
+
+export const staffController = {
+  listStaff: asyncHandler(async (req: Request, res: Response) => {
+    const restaurantId = (req as AuthenticatedRequest).user.restaurantId!;
+    const { staff, meta } = await staffService.listStaff(
+      restaurantId,
+      req.query.page,
+      req.query.limit,
+    );
+    sendSuccess(res, HTTP_STATUS.OK, staff, meta);
+  }),
+
+  createStaff: asyncHandler(async (req: Request, res: Response) => {
+    const restaurantId = (req as AuthenticatedRequest).user.restaurantId!;
+    const member = await staffService.createStaffMember(restaurantId, req.body);
+    sendSuccess(res, HTTP_STATUS.CREATED, member);
+  }),
+
+  updateStaff: asyncHandler(async (req: Request, res: Response) => {
+    const restaurantId = (req as AuthenticatedRequest).user.restaurantId!;
+    const member = await staffService.updateStaffMember(
+      req.params.id,
+      restaurantId,
+      req.body,
+    );
+    sendSuccess(res, HTTP_STATUS.OK, member);
+  }),
+
+  deactivateStaff: asyncHandler(async (req: Request, res: Response) => {
+    const restaurantId = (req as AuthenticatedRequest).user.restaurantId!;
+    await staffService.deactivateStaffMember(req.params.id, restaurantId);
+    sendSuccess(res, HTTP_STATUS.OK);
+  }),
+};

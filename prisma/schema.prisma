@@ -1,0 +1,221 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  KITCHEN_STAFF
+  WAITER
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PREPARING
+  READY
+  DELIVERED
+  CANCELLED
+}
+
+enum OrderType {
+  DINE_IN
+  TAKEAWAY
+  DELIVERY
+}
+
+enum KitchenType {
+  MAIN
+  TIME_TAKING
+  READY_TO_SERVE
+}
+
+// ─── Models ──────────────────────────────────────────────────────────────────
+
+model Restaurant {
+  id          String   @id @default(cuid())
+  name        String   @db.VarChar(255)
+  slug        String   @unique @db.VarChar(100)
+  description String?  @db.Text
+  logoUrl     String?
+  bannerUrl   String?
+  address     Json?
+  phone       String?  @db.VarChar(20)
+  email       String?  @db.VarChar(255)
+  timezone    String   @default("Asia/Kolkata") @db.VarChar(50)
+  currency    String   @default("INR") @db.VarChar(10)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  categories Category[]
+  orders     Order[]
+  users      User[]
+
+  @@map("restaurants")
+}
+
+model User {
+  id           String    @id @default(cuid())
+  restaurantId String?
+  email        String    @unique @db.VarChar(255)
+  passwordHash String
+  firstName    String    @db.VarChar(50)
+  lastName     String    @db.VarChar(50)
+  phone        String?   @db.VarChar(20)
+  role         UserRole  @default(KITCHEN_STAFF)
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  restaurant Restaurant? @relation(fields: [restaurantId], references: [id], onDelete: SetNull)
+  sessions   Session[]
+
+  @@index([restaurantId])
+  @@map("users")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  userId       String
+  refreshToken String   @unique
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model Category {
+  id           String   @id @default(cuid())
+  restaurantId String
+  name         String   @db.VarChar(100)
+  description  String?  @db.VarChar(500)
+  imageUrl     String?
+  sortOrder    Int      @default(0)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  menuItems  MenuItem[]
+
+  @@index([restaurantId, sortOrder])
+  @@map("categories")
+}
+
+model MenuItem {
+  id           String      @id @default(cuid())
+  categoryId   String
+  name         String      @db.VarChar(150)
+  description  String?     @db.VarChar(1000)
+  price        Decimal     @db.Decimal(10, 2)
+  imageUrl     String?
+  kitchenType  KitchenType @default(MAIN)
+  isAvailable  Boolean     @default(true)
+  isPopular    Boolean     @default(false)
+  isVeg        Boolean     @default(true)
+  calories     Int?
+  prepTimeMins Int         @default(15)
+  sortOrder    Int         @default(0)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  category   Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
+
+  @@index([categoryId, sortOrder])
+  @@index([isAvailable])
+  @@map("menu_items")
+}
+
+model Order {
+  id              String      @id @default(cuid())
+  orderNumber     String      @unique @db.VarChar(30)
+  restaurantId    String
+  status          OrderStatus @default(PENDING)
+  orderType       OrderType   @default(DINE_IN)
+  tableNumber     String?     @db.VarChar(20)
+  customerName    String?     @db.VarChar(100)
+  customerPhone   String?     @db.VarChar(20)
+  customerEmail   String?     @db.VarChar(255)
+  notes           String?     @db.VarChar(1000)
+  deliveryAddress String?     @db.VarChar(500)
+  subtotal        Decimal     @db.Decimal(10, 2)
+  taxAmount       Decimal     @default(0) @db.Decimal(10, 2)
+  totalAmount     Decimal     @db.Decimal(10, 2)
+  estimatedMins   Int         @default(20)
+  confirmedAt     DateTime?
+  preparedAt      DateTime?
+  readyAt         DateTime?
+  deliveredAt     DateTime?
+  cancelledAt     DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  restaurant   Restaurant          @relation(fields: [restaurantId], references: [id], onDelete: Restrict)
+  items        OrderItem[]
+  statusHistory OrderStatusHistory[]
+
+  @@index([restaurantId, status])
+  @@index([restaurantId, createdAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id         String  @id @default(cuid())
+  orderId    String
+  menuItemId String
+  name       String  @db.VarChar(150)
+  price      Decimal @db.Decimal(10, 2)
+  quantity   Int
+  subtotal   Decimal @db.Decimal(10, 2)
+  notes      String? @db.VarChar(500)
+
+  order    Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItem MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+model OrderStatusHistory {
+  id        String      @id @default(cuid())
+  orderId   String
+  status    OrderStatus
+  note      String?     @db.VarChar(500)
+  createdAt DateTime    @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@map("order_status_history")
+}
+
+model DailyAnalytics {
+  id              String   @id @default(cuid())
+  restaurantId    String
+  date            DateTime @db.Date
+  totalOrders     Int      @default(0)
+  completedOrders Int      @default(0)
+  cancelledOrders Int      @default(0)
+  totalRevenue    Decimal  @default(0) @db.Decimal(12, 2)
+  avgPrepTimeMins Decimal  @default(0) @db.Decimal(6, 2)
+  peakHour        Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([restaurantId, date])
+  @@index([restaurantId, date])
+  @@map("daily_analytics")
+}
