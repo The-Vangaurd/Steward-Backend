@@ -3,6 +3,7 @@ import { cacheGet, cacheSet, cacheDel } from '../utils/redis';
 import { CACHE_KEYS, CACHE_TTL } from '../constants';
 import { ApiError } from '../utils/ApiError';
 import { logger } from '../utils/logger';
+import { Prisma } from '@prisma/client';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -15,7 +16,8 @@ export interface SettingsPatch {
   fontHeading?: string | null;
   fontBody?: string | null;
   customCss?: string | null;
-  openingHours?: unknown;
+  // Strictly typed for Prisma JSON columns
+  openingHours?: Prisma.InputJsonValue;
   offlineMode?: boolean;
 }
 

@@ -72,13 +72,19 @@ export const authService = {
     const slug = await generateUniqueSlug(input.restaurantName);
     const passwordHash = await bcrypt.hash(input.password, SALT_ROUNDS);
 
+    // Split ownerName into firstName and lastName for the User record
+    const nameParts = input.ownerName.trim().split(/\s+/);
+    const firstName = nameParts[0];
+    const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+
     const result = await prisma.$transaction(async (tx) => {
       const restaurant = await tx.restaurant.create({
         data: {
           name: input.restaurantName,
           slug,
-          phone: input.restaurantPhone,
-          email: input.restaurantEmail,
+          // Reusing user phone/email since specific restaurant fields don't exist on OwnerRegisterInput
+          phone: input.phone,
+          email: input.email,
           // Bootstrap default settings row alongside the restaurant
           settings: { create: {} },
         },
@@ -88,8 +94,8 @@ export const authService = {
         data: {
           email: input.email,
           passwordHash,
-          firstName: input.firstName,
-          lastName: input.lastName,
+          firstName,
+          lastName,
           phone: input.phone,
           role: UserRole.ADMIN,
           restaurantId: restaurant.id,
@@ -103,8 +109,12 @@ export const authService = {
       return { user, restaurant };
     });
 
-    const accessToken  = signAccessToken({ sub: result.user.id, role: result.user.role, restaurantId: result.restaurant.id });
-    const refreshToken = signRefreshToken({ sub: result.user.id });
+    const accessToken = signAccessToken({
+      id: result.user.id,
+      role: result.user.role,
+      restaurantId: result.restaurant.id
+    });
+    const refreshToken = signRefreshToken(result.user.id);
 
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     await prisma.session.create({ data: { userId: result.user.id, refreshToken, expiresAt } });
@@ -121,8 +131,12 @@ export const authService = {
 
     await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
 
-    const accessToken  = signAccessToken({ sub: user.id, role: user.role, restaurantId: user.restaurantId ?? undefined });
-    const refreshToken = signRefreshToken({ sub: user.id });
+    const accessToken = signAccessToken({
+      id: user.id,
+      role: user.role,
+      restaurantId: user.restaurantId ?? null
+    });
+    const refreshToken = signRefreshToken(user.id);
 
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     await prisma.session.create({ data: { userId: user.id, refreshToken, expiresAt } });
@@ -139,30 +153,29 @@ export const authService = {
 
   /**
    * Refresh access + refresh tokens.
-   *
-   * The axios call from the frontend sends an empty request body — this is
-   * intentional. The refresh token is transmitted exclusively via the
-   * HttpOnly cookie set with path=/v1/auth/refresh.  Sending it in the body
-   * would expose it to JavaScript and defeat the HttpOnly protection.
-   *
-   * The cookie path restriction (/v1/auth/refresh) ensures the browser only
-   * attaches the cookie to this single endpoint, limiting the CSRF attack surface.
    */
   async refresh(refreshToken: string) {
-    const payload = verifyRefreshToken(refreshToken);
+    // Cast to any to safely extract ID depending on your jwt utility's exact return type
+    const payload: any = verifyRefreshToken(refreshToken);
     if (!payload) throw ApiError.unauthorized('Invalid or expired refresh token');
+
+    const targetUserId = typeof payload === 'string' ? payload : (payload.id || payload.sub);
 
     const session = await prisma.session.findUnique({ where: { refreshToken } });
     if (!session || session.expiresAt < new Date()) {
       throw ApiError.unauthorized('Refresh token revoked or expired');
     }
 
-    const user = await prisma.user.findUnique({ where: { id: payload.sub } });
+    const user = await prisma.user.findUnique({ where: { id: targetUserId } });
     if (!user || !user.isActive) throw ApiError.unauthorized('User not found or inactive');
 
     // Rotate: delete old session, create a new one
-    const newRefreshToken = signRefreshToken({ sub: user.id });
-    const newAccessToken  = signAccessToken({ sub: user.id, role: user.role, restaurantId: user.restaurantId ?? undefined });
+    const newRefreshToken = signRefreshToken(user.id);
+    const newAccessToken = signAccessToken({
+      id: user.id,
+      role: user.role,
+      restaurantId: user.restaurantId ?? null
+    });
 
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     await prisma.$transaction([

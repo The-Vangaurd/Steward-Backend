@@ -34,7 +34,8 @@ export const staffController = {
 
   deactivateStaff: asyncHandler(async (req: Request, res: Response) => {
     const restaurantId = (req as AuthenticatedRequest).user.restaurantId!;
-    await staffService.deactivateStaffMember(req.params.id, restaurantId);
+    // Use the existing update method to flip the active flag instead of a missing deactivate method
+    await staffService.updateStaffMember(req.params.id, restaurantId, { isActive: false });
     sendSuccess(res, HTTP_STATUS.OK);
   }),
 };
