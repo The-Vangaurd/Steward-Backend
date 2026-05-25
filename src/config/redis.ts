@@ -2,25 +2,39 @@ import Redis from 'ioredis';
 import { env } from './env';
 import { logger } from '../utils/logger';
 
-export const redis = new Redis(env.REDIS_URL, {
-  maxRetriesPerRequest: 3,
-  enableReadyCheck: true,
-  lazyConnect: true,
-});
-
-redis.on('connect', () => logger.info('Redis connected'));
-redis.on('error', (err) => logger.error('Redis error', { error: err.message }));
-redis.on('close', () => logger.warn('Redis connection closed'));
+export let redis: Redis | null = null;
 
 export const connectRedis = async (): Promise<void> => {
-  await redis.connect();
-};
-
-export const checkRedisConnection = async (): Promise<boolean> => {
   try {
-    const result = await redis.ping();
-    return result === 'PONG';
-  } catch {
-    return false;
+    if (!env.REDIS_URL) {
+      logger.warn('REDIS_URL missing. Redis disabled.');
+      return;
+    }
+
+    redis = new Redis(env.REDIS_URL, {
+      maxRetriesPerRequest: 1,
+      enableReadyCheck: false,
+      lazyConnect: true,
+    });
+
+    redis.on('error', (err) => {
+      logger.error('Redis error', {
+        error: err.message,
+      });
+    });
+
+    redis.on('close', () => {
+      logger.warn('Redis connection closed');
+    });
+
+    await redis.connect();
+
+    logger.info('Redis connected');
+  } catch (err) {
+    logger.error('Redis initialization failed', {
+      error: (err as Error).message,
+    });
+
+    redis = null;
   }
 };
