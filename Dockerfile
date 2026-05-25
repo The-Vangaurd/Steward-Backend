@@ -11,9 +11,7 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Tell Prisma to use the Alpine-compatible binary engine
-ENV PRISMA_CLI_BINARY_TARGETS=native,linux-musl-openssl-3.0.x
-
+# Generate Prisma client and build the app
 RUN npx prisma generate
 RUN npm run build
 
