@@ -9,7 +9,7 @@ import cookieParser from 'cookie-parser';
 
 import { env } from './config/env';
 import { connectDatabase } from './config/database';
-import { connectRedis } from './config/redis';
+import { connectRedis, REDIS_DEGRADED } from './config/redis';
 import { initSocket } from './sockets';
 import { logger } from './utils/logger';
 import { errorHandler, notFoundHandler } from './middlewares/error.middleware';
@@ -34,14 +34,10 @@ app.use(helmet());
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (like mobile apps, curl, or postman)
       if (!origin) return callback(null, true);
-
       const allowedOrigins = env.CORS_ORIGINS
         ? env.CORS_ORIGINS.split(',').map((o) => o.trim())
         : [];
-
-      // If no origins configured, default to allow the origin dynamically (safe with credentials)
       if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
@@ -83,52 +79,58 @@ app.use(errorHandler);
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 const start = async (): Promise<void> => {
   try {
-    console.log('Starting backend...');
-    console.log('Environment PORT:', env.PORT);
+    logger.info('Starting backend...');
 
-    // DATABASE
+    // DATABASE — critical; failure aborts boot
     await connectDatabase();
     logger.info('Database connected');
 
-    // START SERVER FIRST
-    httpServer.listen(env.PORT, '0.0.0.0', () => {
-      logger.info(`Server running on port ${env.PORT} [${env.NODE_ENV}]`);
+    // START HTTP SERVER FIRST — so health checks pass during init
+    await new Promise<void>((resolve) => {
+      httpServer.listen(env.PORT, '0.0.0.0', () => {
+        logger.info(`Server running on port ${env.PORT} [${env.NODE_ENV}]`);
+        resolve();
+      });
     });
 
-    // REDIS (NON-BLOCKING)
-    try {
-      await connectRedis();
-      logger.info('Redis connected');
-    } catch (err) {
-      logger.error('Redis connection failed', {
-        error: (err as Error).message,
-      });
+    // REDIS — non-critical; failure → degraded mode, server keeps running
+    await connectRedis();
+    if (REDIS_DEGRADED) {
+      logger.warn(
+        '⚠️  DEGRADED MODE: Redis unavailable. ' +
+        'Rate limiting uses memory store. Caching and job queues are disabled.',
+      );
     }
 
     // SOCKETS
     initSocket(httpServer);
 
-    // BACKGROUND JOBS (NON-BLOCKING)
+    // BACKGROUND JOBS — skip entirely if Redis is unavailable (BullMQ needs it)
     if (env.NODE_ENV !== 'test') {
-      try {
-        startAnalyticsWorker();
-        logger.info('Analytics worker started');
-
-        await startAnalyticsCron();
-        logger.info('Analytics midnight cron registered');
-      } catch (jobErr) {
-        logger.error('Failed to initialize background analytics jobs', {
-          error: (jobErr as Error).message,
-        });
+      if (REDIS_DEGRADED) {
+        logger.warn(
+          '⚠️  DEGRADED MODE: Skipping analytics workers (Redis required). ' +
+          'Analytics aggregation will not run until Redis is restored.',
+        );
+      } else {
+        try {
+          startAnalyticsWorker();
+          logger.info('Analytics worker started');
+          await startAnalyticsCron();
+          logger.info('Analytics midnight cron registered');
+        } catch (jobErr) {
+          logger.error('Failed to initialize background analytics jobs', {
+            error: (jobErr as Error).message,
+          });
+        }
       }
     }
 
   } catch (err) {
-    logger.error('Failed to start server', {
+    logger.error('Fatal: Failed to start server', {
       error: (err as Error).message,
       stack: (err as Error).stack,
     });
-
     process.exit(1);
   }
 };
@@ -136,7 +138,6 @@ const start = async (): Promise<void> => {
 // ── Graceful shutdown ─────────────────────────────────────────────────────────
 const shutdown = async (signal: string): Promise<void> => {
   logger.info(`Received ${signal}, shutting down gracefully`);
-
   httpServer.close(() => {
     logger.info('HTTP server closed');
     process.exit(0);
@@ -147,11 +148,7 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
 process.on('uncaughtException', (err) => {
-  logger.error('Uncaught exception', {
-    error: err.message,
-    stack: err.stack,
-  });
-
+  logger.error('Uncaught exception', { error: err.message, stack: err.stack });
   process.exit(1);
 });
 
@@ -160,7 +157,6 @@ process.on('unhandledRejection', (reason) => {
   process.exit(1);
 });
 
-// START APP
 start();
 
 export { app, httpServer };
