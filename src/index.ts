@@ -33,9 +33,21 @@ app.use(helmet());
 
 app.use(
   cors({
-    origin: env.CORS_ORIGINS
-      ? env.CORS_ORIGINS.split(',').map((o) => o.trim())
-      : '*',
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps, curl, or postman)
+      if (!origin) return callback(null, true);
+
+      const allowedOrigins = env.CORS_ORIGINS
+        ? env.CORS_ORIGINS.split(',').map((o) => o.trim())
+        : [];
+
+      // If no origins configured, default to allow the origin dynamically (safe with credentials)
+      if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     credentials: true,
   }),
 );
