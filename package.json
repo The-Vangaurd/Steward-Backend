@@ -16,7 +16,7 @@
     "prisma:studio": "prisma studio",
     "typecheck": "tsc --noEmit",
     "build:full": "prisma generate && tsc --project tsconfig.json",
-    "start:migrate": "npx --no-install prisma migrate deploy && node dist/index.js"
+    "start:migrate": "npx prisma@5.14.0 migrate deploy && node dist/index.js"
   },
   "prisma": {
     "schema": "prisma/schema.prisma",

@@ -1,6 +1,6 @@
 # ─── Stage 1: deps ───────────────────────────────────────────────────────────
 FROM node:20-alpine AS deps
-RUN apk add --no-cache libc6-compat
+RUN apk add --no-cache libc6-compat openssl
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci --ignore-scripts --legacy-peer-deps
@@ -10,15 +10,20 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+
+# Tell Prisma to use the Alpine-compatible binary engine
+ENV PRISMA_CLI_BINARY_TARGETS=native,linux-musl-openssl-3.0.x
+
 RUN npx prisma generate
 RUN npm run build
+
 # Prune development dependencies to keep the production footprint small
 RUN npm prune --production --legacy-peer-deps
 
 # ─── Stage 3: production runner ──────────────────────────────────────────────
 FROM node:20-alpine AS runner
-# Install libc6-compat in the runner stage so the Prisma binary can execute migrations
-RUN apk add --no-cache libc6-compat
+# Install libc6-compat and openssl so the Prisma binary can execute migrations
+RUN apk add --no-cache libc6-compat openssl
 WORKDIR /app
 
 ENV NODE_ENV=production
@@ -41,5 +46,5 @@ USER nextjs
 
 EXPOSE 4000
 
-# Run migrations then start server
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/index.js"]
+# Run migrations then start server via the package.json script
+CMD ["npm", "run", "start:migrate"]
