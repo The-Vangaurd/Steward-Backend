@@ -25,38 +25,61 @@ export const initSocket = (httpServer: HttpServer): Server => {
     transports: ['websocket', 'polling'],
   });
 
-  if (env.REDIS_URL) {
+  // ── Redis adapter ────────────────────────────────────────────────────────────
+
+  if (!env.REDIS_URL) {
+    logger.warn('Socket.IO initialized with in-memory adapter (Redis disabled)');
+  } else {
     try {
       const pubClient = new Redis(env.REDIS_URL, {
         maxRetriesPerRequest: 1,
         lazyConnect: true,
       });
 
-      pubClient.on('error', (err) => {
-        logger.error('Socket Redis pubClient error', { error: err.message });
-      });
-
       const subClient = pubClient.duplicate();
+
+      pubClient.on('error', (err) => {
+        logger.error('Socket Redis pubClient error', {
+          error: err.message,
+        });
+      });
+
       subClient.on('error', (err) => {
-        logger.error('Socket Redis subClient error', { error: err.message });
+        logger.error('Socket Redis subClient error', {
+          error: err.message,
+        });
       });
 
-      io.adapter(createAdapter(pubClient, subClient));
-      logger.info('Socket.IO initialized with Redis adapter');
+      Promise.all([
+        pubClient.connect(),
+        subClient.connect(),
+      ])
+        .then(() => {
+          io.adapter(createAdapter(pubClient, subClient));
 
-      pubClient.connect().catch((err) => {
-        logger.error('Socket Redis connection failed', { error: err.message });
-      });
-      subClient.connect().catch((err) => {
-        logger.error('Socket Redis sub-connection failed', { error: err.message });
-      });
+          logger.info('Socket.IO initialized with Redis adapter');
+        })
+        .catch((err) => {
+          logger.error('Socket Redis connection failed', {
+            error: err.message,
+          });
+
+          logger.warn(
+            'Falling back to in-memory Socket.IO adapter',
+          );
+        });
     } catch (err) {
-      logger.error('Failed to initialize Redis adapter for Socket.IO, falling back to in-memory', {
-        error: (err as Error).message,
-      });
+      logger.error(
+        'Failed to initialize Redis adapter for Socket.IO',
+        {
+          error: (err as Error).message,
+        },
+      );
+
+      logger.warn(
+        'Falling back to in-memory Socket.IO adapter',
+      );
     }
-  } else {
-    logger.info('Socket.IO initialized with in-memory adapter (Redis disabled)');
   }
 
   // ── JWT auth middleware ──────────────────────────────────────────────────────
