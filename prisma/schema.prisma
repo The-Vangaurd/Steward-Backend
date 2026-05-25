@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
@@ -163,8 +164,8 @@ model Order {
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
 
-  restaurant   Restaurant          @relation(fields: [restaurantId], references: [id], onDelete: Restrict)
-  items        OrderItem[]
+  restaurant    Restaurant           @relation(fields: [restaurantId], references: [id], onDelete: Restrict)
+  items         OrderItem[]
   statusHistory OrderStatusHistory[]
 
   @@index([restaurantId, status])
