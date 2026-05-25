@@ -2,20 +2,20 @@ import Redis from 'ioredis';
 import { env } from './env';
 import { logger } from '../utils/logger';
 
-export let redis: Redis | null = null;
+export const redis = env.REDIS_URL
+  ? new Redis(env.REDIS_URL, {
+    maxRetriesPerRequest: 1,
+    enableReadyCheck: false,
+    lazyConnect: true,
+  })
+  : null;
 
 export const connectRedis = async (): Promise<void> => {
   try {
-    if (!env.REDIS_URL) {
-      logger.warn('REDIS_URL missing. Redis disabled.');
+    if (!redis) {
+      logger.warn('Redis disabled');
       return;
     }
-
-    redis = new Redis(env.REDIS_URL, {
-      maxRetriesPerRequest: 1,
-      enableReadyCheck: false,
-      lazyConnect: true,
-    });
 
     redis.on('error', (err) => {
       logger.error('Redis error', {
@@ -34,7 +34,17 @@ export const connectRedis = async (): Promise<void> => {
     logger.error('Redis initialization failed', {
       error: (err as Error).message,
     });
+  }
+};
 
-    redis = null;
+export const checkRedisConnection = async (): Promise<boolean> => {
+  try {
+    if (!redis) return false;
+
+    const pong = await redis.ping();
+
+    return pong === 'PONG';
+  } catch {
+    return false;
   }
 };
