@@ -59,8 +59,45 @@ model Restaurant {
   categories Category[]
   orders     Order[]
   users      User[]
+  settings   RestaurantSettings?
 
   @@map("restaurants")
+}
+
+/// Per-restaurant customisation & financial settings.
+/// Created automatically on restaurant registration; always has exactly one row per restaurant.
+model RestaurantSettings {
+  id           String   @id @default(cuid())
+  restaurantId String   @unique
+
+  // ── Financial ──────────────────────────────────────────────────────────────
+  /// Tax rate as a decimal fraction, e.g. 0.05 = 5 %.
+  /// Falls back to 0.05 when null for backward-compatibility.
+  taxRate         Decimal  @default(0.05) @db.Decimal(6, 4)
+  /// Service/platform charge as a decimal fraction, e.g. 0.02 = 2 %.
+  serviceCharge   Decimal  @default(0.00) @db.Decimal(6, 4)
+
+  // ── Branding ───────────────────────────────────────────────────────────────
+  primaryColor    String?  @db.VarChar(20)
+  secondaryColor  String?  @db.VarChar(20)
+  accentColor     String?  @db.VarChar(20)
+  fontHeading     String?  @db.VarChar(100)
+  fontBody        String?  @db.VarChar(100)
+  /// Raw CSS injected into the public menu page (sanitised at write time).
+  customCss       String?  @db.Text
+
+  // ── Operations ─────────────────────────────────────────────────────────────
+  /// JSON array of { day: 0-6, open: "HH:MM", close: "HH:MM", closed: bool }
+  openingHours    Json?
+  /// When true the menu page shows an "ordering unavailable" banner.
+  offlineMode     Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@map("restaurant_settings")
 }
 
 model User {
@@ -94,6 +131,7 @@ model Session {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([expiresAt])
   @@map("sessions")
 }
 

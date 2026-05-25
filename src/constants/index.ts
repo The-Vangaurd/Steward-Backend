@@ -37,12 +37,27 @@ export const ERROR_CODES = {
 
   // Orders
   ORDER_STATUS_INVALID_TRANSITION: 'ORDER_STATUS_INVALID_TRANSITION',
+  ORDER_STATUS_UNDO_NOT_ALLOWED: 'ORDER_STATUS_UNDO_NOT_ALLOWED',
   ORDER_ITEM_UNAVAILABLE: 'ORDER_ITEM_UNAVAILABLE',
 
   // Server
   INTERNAL_ERROR: 'INTERNAL_ERROR',
   SERVICE_UNAVAILABLE: 'SERVICE_UNAVAILABLE',
 } as const;
+
+// ─── Shared constants ─────────────────────────────────────────────────────────
+
+/**
+ * Single authoritative SALT_ROUNDS value — previously duplicated in
+ * auth.service.ts and staff.service.ts.
+ */
+export const SALT_ROUNDS = 12;
+
+/**
+ * Default tax rate used when a restaurant has no RestaurantSettings row,
+ * or when the row's taxRate is null. Preserves backward compatibility.
+ */
+export const DEFAULT_TAX_RATE = 0.05;
 
 // ─── Order Status Flow ────────────────────────────────────────────────────────
 
@@ -86,12 +101,14 @@ export const CACHE_KEYS = {
   order: (id: string) => `order:${id}`,
   analytics: (restaurantId: string, date: string) =>
     `analytics:${restaurantId}:${date}`,
+  settings: (restaurantId: string) => `settings:${restaurantId}`,
 } as const;
 
 export const CACHE_TTL = {
-  MENU: 300,          // 5 minutes
-  CATEGORIES: 600,    // 10 minutes
-  RESTAURANT: 3600,   // 1 hour
-  ORDER: 60,          // 1 minute
-  ANALYTICS: 1800,    // 30 minutes
+  MENU: 300,        // 5 minutes
+  CATEGORIES: 600,  // 10 minutes
+  RESTAURANT: 3600, // 1 hour
+  ORDER: 60,        // 1 minute
+  ANALYTICS: 1800,  // 30 minutes
+  SETTINGS: 600,    // 10 minutes
 } as const;

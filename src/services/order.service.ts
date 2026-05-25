@@ -10,9 +10,11 @@ import { OrderStatus } from '@prisma/client';
 import {
   getAllowedOrderStatusTransitions,
   isValidOrderStatusTransition,
+  validateUndoTransition,
 } from '../utils/stateMachine';
+import { settingsService } from './settings.service';
 
-const TAX_RATE = 0.05; // 5%
+// DEFAULT_TAX_RATE removed — loaded from RestaurantSettings per order.
 
 export const orderService = {
   async createOrder(slugOrId: string, input: CreateOrderInput) {
@@ -23,6 +25,9 @@ export const orderService = {
     });
     if (!restaurant) throw ApiError.notFound('Restaurant not found');
     const restaurantId = restaurant.id;
+
+    // Load tax rate from settings (falls back to 0.05 if no settings row)
+    const taxRate = await settingsService.getTaxRate(restaurantId);
 
     // Validate all menu items exist and are available
     const menuItemIds = input.items.map((i) => i.menuItemId);
@@ -57,11 +62,10 @@ export const orderService = {
     });
 
     const subtotal = orderItems.reduce((sum, i) => sum + i.subtotal, 0);
-    const taxAmount = Math.round(subtotal * TAX_RATE * 100) / 100;
+    const taxAmount = Math.round(subtotal * taxRate * 100) / 100;
     const totalAmount = subtotal + taxAmount;
 
     const maxPrep = Math.max(...menuItems.map((m) => m.prepTimeMins));
-
     const orderNumber = await generateOrderNumber(restaurantId);
 
     const [order] = await prisma.$transaction([
@@ -87,7 +91,6 @@ export const orderService = {
       }),
     ]);
 
-    // Emit real-time events after the transaction commits
     emitToKitchen(restaurantId, SOCKET_EVENTS.KITCHEN_NEW_ORDER, order);
     emitToRestaurant(restaurantId, SOCKET_EVENTS.ORDER_CREATED, order);
 
@@ -150,17 +153,15 @@ export const orderService = {
 
       const timestamps: Record<string, Date> = {};
       if (input.status === OrderStatus.CONFIRMED) timestamps.confirmedAt = new Date();
-      if (input.status === OrderStatus.PREPARING) timestamps.preparedAt = new Date();
-      if (input.status === OrderStatus.READY) timestamps.readyAt = new Date();
-      if (input.status === OrderStatus.DELIVERED) timestamps.deliveredAt = new Date();
-      if (input.status === OrderStatus.CANCELLED) timestamps.cancelledAt = new Date();
+      if (input.status === OrderStatus.PREPARING)  timestamps.preparedAt  = new Date();
+      if (input.status === OrderStatus.READY)      timestamps.readyAt     = new Date();
+      if (input.status === OrderStatus.DELIVERED)  timestamps.deliveredAt = new Date();
+      if (input.status === OrderStatus.CANCELLED)  timestamps.cancelledAt = new Date();
 
+      // Optimistic-lock: only update if status hasn't changed since we read
       const updateResult = await tx.order.updateMany({
         where: { id: orderId, status: order.status },
-        data: {
-          status: input.status,
-          ...timestamps,
-        },
+        data: { status: input.status, ...timestamps },
       });
 
       if (updateResult.count !== 1) {
@@ -171,11 +172,7 @@ export const orderService = {
       }
 
       await tx.orderStatusHistory.create({
-        data: {
-          orderId,
-          status: input.status,
-          note: input.note,
-        },
+        data: { orderId, status: input.status, note: input.note },
       });
 
       const refreshed = await tx.order.findUnique({
@@ -189,13 +186,11 @@ export const orderService = {
 
     await cacheDel(CACHE_KEYS.order(orderId));
 
-    // Emit events
     emitToOrder(orderId, SOCKET_EVENTS.ORDER_STATUS_CHANGED, {
       orderId,
       status: input.status,
       timestamp: new Date(),
     });
-
     emitToKitchen(restaurantId, SOCKET_EVENTS.ORDER_UPDATED, updated);
     emitToAdmin(restaurantId, SOCKET_EVENTS.ORDER_UPDATED, updated);
 
@@ -206,7 +201,59 @@ export const orderService = {
     return updated;
   },
 
-  // ── Kitchen queue ─────────────────────────────────────────────────────────────
+  /**
+   * Kitchen undo: reverse the order one status step backward.
+   * See stateMachine.ts for which transitions are permitted and why
+   * DELIVERED/CANCELLED cannot be rolled back.
+   */
+  async undoOrderStatus(orderId: string, restaurantId: string, note?: string) {
+    const updated = await prisma.$transaction(async (tx) => {
+      const order = await tx.order.findFirst({ where: { id: orderId, restaurantId } });
+      if (!order) throw ApiError.notFound('Order not found');
+
+      let prevStatus: OrderStatus;
+      try {
+        prevStatus = validateUndoTransition(order.status);
+      } catch (err) {
+        throw ApiError.badRequest((err as Error).message, 'ORDER_STATUS_UNDO_NOT_ALLOWED');
+      }
+
+      const updateResult = await tx.order.updateMany({
+        where: { id: orderId, status: order.status },
+        data: { status: prevStatus },
+      });
+
+      if (updateResult.count !== 1) {
+        throw ApiError.conflict(
+          'Order status was modified concurrently. Retry the operation.',
+          'ORDER_STATUS_CONFLICT',
+        );
+      }
+
+      await tx.orderStatusHistory.create({
+        data: {
+          orderId,
+          status: prevStatus,
+          note: note ?? `Reverted from ${order.status} (kitchen undo)`,
+        },
+      });
+
+      const refreshed = await tx.order.findUnique({
+        where: { id: orderId },
+        include: { items: true, statusHistory: { orderBy: { createdAt: 'asc' } } },
+      });
+      if (!refreshed) throw ApiError.notFound('Order not found after undo');
+      return refreshed;
+    });
+
+    await cacheDel(CACHE_KEYS.order(orderId));
+    emitToKitchen(restaurantId, SOCKET_EVENTS.ORDER_UPDATED, updated);
+    emitToAdmin(restaurantId, SOCKET_EVENTS.ORDER_UPDATED, updated);
+
+    return updated;
+  },
+
+  // ── Kitchen queue ─────────────────────────────────────────────────────────
 
   async getKitchenOrders(restaurantId: string) {
     const activeStatuses = [
@@ -223,18 +270,18 @@ export const orderService = {
     });
   },
 
-  // ── Admin order listing ───────────────────────────────────────────────────────
+  // ── Admin order listing ───────────────────────────────────────────────────
 
   async getAdminOrders(restaurantId: string, query: OrderQuery) {
     const pagination = parsePagination(query.page, query.limit);
 
     const where: Record<string, unknown> = { restaurantId };
-    if (query.status) where.status = query.status;
+    if (query.status)    where.status    = query.status;
     if (query.orderType) where.orderType = query.orderType;
     if (query.from || query.to) {
       where.createdAt = {
         ...(query.from && { gte: new Date(query.from) }),
-        ...(query.to && { lte: new Date(query.to) }),
+        ...(query.to   && { lte: new Date(query.to) }),
       };
     }
 

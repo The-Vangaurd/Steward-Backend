@@ -9,28 +9,29 @@ import cookieParser from 'cookie-parser';
 
 import { env } from './config/env';
 import { connectDatabase } from './config/database';
-import { connectRedis, REDIS_DEGRADED } from './config/redis';
+import { connectRedis } from './config/redis';
 import { initSocket } from './sockets';
 import { logger } from './utils/logger';
 import { errorHandler, notFoundHandler } from './middlewares/error.middleware';
 import { globalRateLimiter } from './middlewares/rateLimiter.middleware';
 
-import { startAnalyticsWorker, startAnalyticsCron } from './jobs/analytics.job';
+import { startAnalyticsWorker, startAnalyticsCron, startSessionCleanupCron } from './jobs/analytics.job';
 
 // ── Routes ────────────────────────────────────────────────────────────────────
-import healthRouter from './routes/health.routes';
-import authRouter from './routes/auth.routes';
-import menuRouter from './routes/menu.routes';
-import orderRouter from './routes/order.routes';
+import healthRouter    from './routes/health.routes';
+import authRouter      from './routes/auth.routes';
+import menuRouter      from './routes/menu.routes';
+import orderRouter     from './routes/order.routes';
 import analyticsRouter from './routes/analytics.routes';
-import staffRouter from './routes/staff.routes';
+import staffRouter     from './routes/staff.routes';
+import settingsRouter  from './routes/settings.routes';
+import themeRouter     from './routes/theme.routes';
 
 const app = express();
 const httpServer = http.createServer(app);
 
 // ── Security & parsing ────────────────────────────────────────────────────────
 app.use(helmet());
-
 app.use(
   cors({
     origin: (origin, callback) => {
@@ -47,7 +48,6 @@ app.use(
     credentials: true,
   }),
 );
-
 app.use(compression());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -65,12 +65,14 @@ app.use(
 app.use(globalRateLimiter);
 
 // ── Routes ────────────────────────────────────────────────────────────────────
-app.use('/health', healthRouter);
-app.use('/v1/auth', authRouter);
-app.use('/v1/menu', menuRouter);
-app.use('/v1/orders', orderRouter);
-app.use('/v1/admin/analytics', analyticsRouter);
-app.use('/v1/admin/staff', staffRouter);
+app.use('/health',                   healthRouter);
+app.use('/v1/auth',                  authRouter);
+app.use('/v1/menu',                  menuRouter);
+app.use('/v1/menu',                  themeRouter);   // GET /v1/menu/:slug/theme (public)
+app.use('/v1/orders',                orderRouter);
+app.use('/v1/admin/analytics',       analyticsRouter);
+app.use('/v1/admin/staff',           staffRouter);
+app.use('/v1/settings',              settingsRouter); // GET/PATCH /v1/settings
 
 // ── 404 & error handlers ──────────────────────────────────────────────────────
 app.use(notFoundHandler);
@@ -79,55 +81,53 @@ app.use(errorHandler);
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 const start = async (): Promise<void> => {
   try {
-    logger.info('Starting backend...');
+    logger.info('Starting Steward Backend', { env: env.NODE_ENV, port: env.PORT });
 
-    // DATABASE — critical; failure aborts boot
+    // 1. Database — fatal if unreachable
     await connectDatabase();
-    logger.info('Database connected');
+    logger.info('Database connected ✓');
 
-    // START HTTP SERVER FIRST — so health checks pass during init
+    // 2. HTTP server — start before optional services so health checks work immediately
     await new Promise<void>((resolve) => {
       httpServer.listen(env.PORT, '0.0.0.0', () => {
-        logger.info(`Server running on port ${env.PORT} [${env.NODE_ENV}]`);
+        logger.info(`HTTP server listening on :${env.PORT} [${env.NODE_ENV}]`);
         resolve();
       });
     });
 
-    // REDIS — non-critical; failure → degraded mode, server keeps running
-    await connectRedis();
-    if (REDIS_DEGRADED) {
-      logger.warn(
-        '⚠️  DEGRADED MODE: Redis unavailable. ' +
-        'Rate limiting uses memory store. Caching and job queues are disabled.',
-      );
+    // 3. Redis — non-fatal fallback (caching and sockets degrade gracefully)
+    try {
+      await connectRedis();
+      logger.info('Redis connected ✓');
+    } catch (err) {
+      logger.warn('Redis unavailable — continuing without cache/pub-sub', {
+        error: (err as Error).message,
+      });
     }
 
-    // SOCKETS
+    // 4. Sockets
     initSocket(httpServer);
+    logger.info('Socket.IO initialised ✓');
 
-    // BACKGROUND JOBS — skip entirely if Redis is unavailable (BullMQ needs it)
+    // 5. Background jobs — non-fatal
     if (env.NODE_ENV !== 'test') {
-      if (REDIS_DEGRADED) {
-        logger.warn(
-          '⚠️  DEGRADED MODE: Skipping analytics workers (Redis required). ' +
-          'Analytics aggregation will not run until Redis is restored.',
-        );
-      } else {
-        try {
-          startAnalyticsWorker();
-          logger.info('Analytics worker started');
-          await startAnalyticsCron();
-          logger.info('Analytics midnight cron registered');
-        } catch (jobErr) {
-          logger.error('Failed to initialize background analytics jobs', {
-            error: (jobErr as Error).message,
-          });
-        }
+      try {
+        startAnalyticsWorker();
+        logger.info('Analytics worker started ✓');
+        await startAnalyticsCron();
+        logger.info('Analytics cron registered ✓');
+        await startSessionCleanupCron();
+        logger.info('Session cleanup cron registered ✓');
+      } catch (jobErr) {
+        logger.error('Background job initialisation failed (non-fatal)', {
+          error: (jobErr as Error).message,
+        });
       }
     }
 
+    logger.info('Steward Backend ready ✓');
   } catch (err) {
-    logger.error('Fatal: Failed to start server', {
+    logger.error('Fatal startup error', {
       error: (err as Error).message,
       stack: (err as Error).stack,
     });
@@ -137,7 +137,7 @@ const start = async (): Promise<void> => {
 
 // ── Graceful shutdown ─────────────────────────────────────────────────────────
 const shutdown = async (signal: string): Promise<void> => {
-  logger.info(`Received ${signal}, shutting down gracefully`);
+  logger.info(`Received ${signal} — shutting down gracefully`);
   httpServer.close(() => {
     logger.info('HTTP server closed');
     process.exit(0);
@@ -145,7 +145,7 @@ const shutdown = async (signal: string): Promise<void> => {
 };
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGINT',  () => shutdown('SIGINT'));
 
 process.on('uncaughtException', (err) => {
   logger.error('Uncaught exception', { error: err.message, stack: err.stack });

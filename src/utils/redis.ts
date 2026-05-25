@@ -1,6 +1,8 @@
 import { redis } from '../config/redis';
 import { logger } from './logger';
 
+// ── Generic typed cache helpers ───────────────────────────────────────────────
+
 export const cacheGet = async <T>(key: string): Promise<T | null> => {
   try {
     if (!redis) return null;
@@ -40,11 +42,31 @@ export const cacheDel = async (...keys: string[]): Promise<void> => {
   }
 };
 
+/**
+ * Delete all keys matching a glob pattern using SCAN instead of KEYS.
+ *
+ * KEYS blocks the Redis event loop for the duration of the scan — dangerous
+ * at scale. SCAN is O(1) per call and yields control between iterations.
+ */
 export const cacheDelPattern = async (pattern: string): Promise<void> => {
   try {
     if (!redis) return;
-    const keys = await redis.keys(pattern);
-    if (keys.length) await redis.del(...keys);
+
+    let cursor = '0';
+    const toDelete: string[] = [];
+
+    do {
+      const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      cursor = nextCursor;
+      toDelete.push(...keys);
+    } while (cursor !== '0');
+
+    if (toDelete.length > 0) {
+      // Delete in batches of 500 to avoid oversized DEL commands
+      for (let i = 0; i < toDelete.length; i += 500) {
+        await redis.del(...toDelete.slice(i, i + 500));
+      }
+    }
   } catch (err) {
     logger.warn('Cache del pattern failed', {
       pattern,
@@ -53,7 +75,8 @@ export const cacheDelPattern = async (pattern: string): Promise<void> => {
   }
 };
 
-// Aliases for compatibility
+// ── String aliases (legacy compat) ────────────────────────────────────────────
+
 export const getCache = async (key: string): Promise<string | null> => {
   try {
     if (!redis) return null;
@@ -89,14 +112,5 @@ export const deleteCache = async (key: string): Promise<void> => {
   }
 };
 
-export const clearCacheByPattern = async (pattern: string): Promise<void> => {
-  try {
-    if (!redis) return;
-    const keys = await redis.keys(pattern);
-    if (keys.length > 0) {
-      await redis.del(...keys);
-    }
-  } catch {
-    return;
-  }
-};
+/** @deprecated Use cacheDelPattern — this alias exists for backward compat */
+export const clearCacheByPattern = cacheDelPattern;

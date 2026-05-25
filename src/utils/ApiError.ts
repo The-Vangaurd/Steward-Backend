@@ -1,58 +1,48 @@
-// ApiError.ts — add serviceUnavailable() to the existing class
-// Only the new method and the class shell are shown; merge with existing file.
-//
-// ADD this static method to your existing ApiError class:
-//
-//   static serviceUnavailable(message: string, code?: string): ApiError {
-//     return new ApiError(503, message, code ?? 'SERVICE_UNAVAILABLE');
-//   }
-//
-// ─────────────────────────────────────────────────────────────────────────────
-// Full replacement if you prefer to overwrite the file entirely:
+import { HTTP_STATUS, ERROR_CODES } from '../constants';
 
 export class ApiError extends Error {
   public readonly statusCode: number;
   public readonly code: string;
+  public readonly details?: unknown;
   public readonly isOperational: boolean;
 
-  constructor(statusCode: number, message: string, code = 'INTERNAL_ERROR', isOperational = true) {
+  constructor(
+    statusCode: number,
+    message: string,
+    code: string,
+    details?: unknown,
+    isOperational = true,
+  ) {
     super(message);
+    Object.setPrototypeOf(this, new.target.prototype);
     this.statusCode = statusCode;
     this.code = code;
+    this.details = details;
     this.isOperational = isOperational;
     Error.captureStackTrace(this, this.constructor);
   }
 
-  static badRequest(message: string, code?: string): ApiError {
-    return new ApiError(400, message, code ?? 'BAD_REQUEST');
+  static badRequest(message: string, code: string = ERROR_CODES.VALIDATION_ERROR, details?: unknown): ApiError {
+    return new ApiError(HTTP_STATUS.BAD_REQUEST, message, code, details);
   }
 
-  static unauthorized(message: string, code?: string): ApiError {
-    return new ApiError(401, message, code ?? 'UNAUTHORIZED');
+  static unauthorized(message = 'Unauthorized', code: string = ERROR_CODES.UNAUTHORIZED): ApiError {
+    return new ApiError(HTTP_STATUS.UNAUTHORIZED, message, code);
   }
 
-  static forbidden(message: string, code?: string): ApiError {
-    return new ApiError(403, message, code ?? 'FORBIDDEN');
+  static forbidden(message = 'Forbidden', code: string = ERROR_CODES.FORBIDDEN): ApiError {
+    return new ApiError(HTTP_STATUS.FORBIDDEN, message, code);
   }
 
-  static notFound(message: string, code?: string): ApiError {
-    return new ApiError(404, message, code ?? 'NOT_FOUND');
+  static notFound(message = 'Resource not found', code: string = ERROR_CODES.NOT_FOUND): ApiError {
+    return new ApiError(HTTP_STATUS.NOT_FOUND, message, code);
   }
 
-  static conflict(message: string, code?: string): ApiError {
-    return new ApiError(409, message, code ?? 'CONFLICT');
-  }
-
-  static unprocessable(message: string, code?: string): ApiError {
-    return new ApiError(422, message, code ?? 'UNPROCESSABLE');
-  }
-
-  /** 503 — used when an optional external service (e.g. Cloudinary) is unconfigured */
-  static serviceUnavailable(message: string, code?: string): ApiError {
-    return new ApiError(503, message, code ?? 'SERVICE_UNAVAILABLE');
+  static conflict(message: string, code: string = ERROR_CODES.CONFLICT): ApiError {
+    return new ApiError(HTTP_STATUS.CONFLICT, message, code);
   }
 
   static internal(message = 'Internal server error'): ApiError {
-    return new ApiError(500, message, 'INTERNAL_ERROR', false);
+    return new ApiError(HTTP_STATUS.INTERNAL_SERVER_ERROR, message, ERROR_CODES.INTERNAL_ERROR, undefined, false);
   }
 }

@@ -6,6 +6,7 @@ import { env } from '../config/env';
 import { verifyAccessTokenSafe } from '../utils/jwt';
 import { SOCKET_EVENTS, SOCKET_ROOMS } from '../constants';
 import { logger } from '../utils/logger';
+import { prisma } from '../config/database';
 
 let io: Server;
 
@@ -25,7 +26,7 @@ export const initSocket = (httpServer: HttpServer): Server => {
     transports: ['websocket', 'polling'],
   });
 
-  // ── Redis adapter ────────────────────────────────────────────────────────────
+  // ── Redis adapter ──────────────────────────────────────────────────────────
 
   if (!env.REDIS_URL) {
     logger.warn('Socket.IO initialized with in-memory adapter (Redis disabled)');
@@ -35,81 +36,47 @@ export const initSocket = (httpServer: HttpServer): Server => {
         maxRetriesPerRequest: 1,
         lazyConnect: true,
       });
-
       const subClient = pubClient.duplicate();
 
-      pubClient.on('error', (err) => {
-        logger.error('Socket Redis pubClient error', {
-          error: err.message,
-        });
-      });
+      pubClient.on('error', (err) => logger.error('Socket Redis pubClient error', { error: err.message }));
+      subClient.on('error', (err) => logger.error('Socket Redis subClient error', { error: err.message }));
 
-      subClient.on('error', (err) => {
-        logger.error('Socket Redis subClient error', {
-          error: err.message,
-        });
-      });
-
-      Promise.all([
-        pubClient.connect(),
-        subClient.connect(),
-      ])
+      Promise.all([pubClient.connect(), subClient.connect()])
         .then(() => {
           io.adapter(createAdapter(pubClient, subClient));
-
-          logger.info('Socket.IO initialized with Redis adapter');
+          logger.info('Socket.IO Redis adapter attached');
         })
         .catch((err) => {
-          logger.error('Socket Redis connection failed', {
-            error: err.message,
-          });
-
-          logger.warn(
-            'Falling back to in-memory Socket.IO adapter',
-          );
+          logger.error('Socket Redis connection failed, falling back to in-memory', { error: err.message });
         });
     } catch (err) {
-      logger.error(
-        'Failed to initialize Redis adapter for Socket.IO',
-        {
-          error: (err as Error).message,
-        },
-      );
-
-      logger.warn(
-        'Falling back to in-memory Socket.IO adapter',
-      );
+      logger.error('Failed to initialise Socket.IO Redis adapter', { error: (err as Error).message });
     }
   }
 
-  // ── JWT auth middleware ──────────────────────────────────────────────────────
+  // ── JWT auth middleware ────────────────────────────────────────────────────
+
   io.use((socket: Socket, next) => {
     const token =
       socket.handshake.auth?.token ||
       socket.handshake.headers?.authorization?.replace?.('Bearer ', '');
 
-    // default socket data
     socket.data = socket.data || {};
     socket.data.user = null;
     socket.data.isAuthenticated = false;
 
-    // Public connections (customer order tracking) may omit a token
     if (!token) return next();
 
     const result = verifyAccessTokenSafe(token);
     if (!result.payload && !result.expired) {
       return next(new Error('TOKEN_INVALID'));
     }
-
     if (result.expired) {
-      // Attach decoded payload for potential client-side refresh flow, but reject
-      // the handshake so clients can refresh tokens and reconnect.
       socket.data.user = result.payload ?? null;
       socket.data.isAuthenticated = false;
       return next(new Error('TOKEN_EXPIRED'));
     }
 
-    // valid token
     socket.data.user = result.payload;
     socket.data.isAuthenticated = true;
     return next();
@@ -119,19 +86,19 @@ export const initSocket = (httpServer: HttpServer): Server => {
     const user = socket.data.user;
     logger.info('WS client connected', { socketId: socket.id, userId: user?.sub ?? 'guest' });
 
-    // ── Room join/leave with authorization checks ──────────────────────────────
-    socket.on(SOCKET_EVENTS.JOIN_ROOM, (room: string, cb?: (err?: { code: string; message: string } | null) => void) => {
+    socket.on(SOCKET_EVENTS.JOIN_ROOM, async (
+      room: string,
+      cb?: (err?: { code: string; message: string } | null) => void,
+    ) => {
       try {
         const [prefix, id] = room.split(':');
 
-        // protect internal/non-pattern rooms
         if (!['restaurant', 'kitchen', 'order', 'admin'].includes(prefix)) {
           throw new Error('INVALID_ROOM');
         }
 
-        // restaurant: room is read-only broadcast — allow unauthenticated public joins.
-        // Authenticated staff are also welcome (they get extra context).
         if (prefix === 'restaurant') {
+          // Read-only broadcast room — open to all (staff and public customers)
           socket.join(room);
           logger.debug('WS joined room', { socketId: socket.id, room });
           cb?.(null);
@@ -140,7 +107,7 @@ export const initSocket = (httpServer: HttpServer): Server => {
 
         if (prefix === 'kitchen') {
           const role = socket.data.user?.role;
-          if (!socket.data.isAuthenticated || ![ 'KITCHEN_STAFF', 'WAITER', 'ADMIN', 'SUPER_ADMIN' ].includes(role)) {
+          if (!socket.data.isAuthenticated || !['KITCHEN_STAFF', 'WAITER', 'ADMIN', 'SUPER_ADMIN'].includes(role)) {
             throw new Error('FORBIDDEN');
           }
           if (socket.data.user?.restaurantId !== id && socket.data.user?.role !== 'SUPER_ADMIN') {
@@ -150,7 +117,7 @@ export const initSocket = (httpServer: HttpServer): Server => {
 
         if (prefix === 'admin') {
           const role = socket.data.user?.role;
-          if (!socket.data.isAuthenticated || ![ 'ADMIN', 'SUPER_ADMIN' ].includes(role)) {
+          if (!socket.data.isAuthenticated || !['ADMIN', 'SUPER_ADMIN'].includes(role)) {
             throw new Error('FORBIDDEN');
           }
           if (socket.data.user?.restaurantId !== id && socket.data.user?.role !== 'SUPER_ADMIN') {
@@ -158,13 +125,25 @@ export const initSocket = (httpServer: HttpServer): Server => {
           }
         }
 
-        // order rooms are allowed for authenticated users belonging to restaurant
         if (prefix === 'order') {
-          // Best-effort: allow authenticated users from same restaurant, or allow anonymous
-          // since customers may not be authenticated. Prevent staff from joining unrelated orders.
-          if (socket.data.isAuthenticated && socket.data.user?.restaurantId && socket.data.user.restaurantId !== id) {
-            throw new Error('FORBIDDEN');
+          // BUG FIX: previously compared restaurantId === orderId (wrong).
+          // Now we look up the order to get its restaurantId and compare that
+          // against the authenticated user's restaurantId, preventing
+          // cross-restaurant socket room access by staff.
+          if (socket.data.isAuthenticated && socket.data.user?.restaurantId) {
+            const order = await prisma.order.findUnique({
+              where: { id },
+              select: { restaurantId: true },
+            });
+
+            if (!order) throw new Error('INVALID_ROOM');
+
+            if (order.restaurantId !== socket.data.user.restaurantId &&
+                socket.data.user.role !== 'SUPER_ADMIN') {
+              throw new Error('FORBIDDEN');
+            }
           }
+          // Unauthenticated guests (customers tracking their order) are allowed through.
         }
 
         socket.join(room);
@@ -172,7 +151,7 @@ export const initSocket = (httpServer: HttpServer): Server => {
         cb?.(null);
       } catch (e: any) {
         const code = e?.message ?? 'INVALID_ROOM';
-        logger.warn('Unauthorized room join attempt', { socketId: socket.id, room, code });
+        logger.warn('Unauthorised room join attempt', { socketId: socket.id, room, code });
         cb?.({ code, message: 'Unauthorized to join room' });
       }
     });
@@ -186,7 +165,7 @@ export const initSocket = (httpServer: HttpServer): Server => {
     });
   });
 
-  logger.info('Socket.IO initialized with Redis adapter');
+  logger.info('Socket.IO initialised');
   return io;
 };
 

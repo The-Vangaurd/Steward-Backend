@@ -13,7 +13,7 @@ import { authRateLimiter } from '../middlewares/rateLimiter.middleware';
 
 const router = Router();
 
-// ── Guards ─────────────────────────────────────────────────────────────────────
+// ── Guards ────────────────────────────────────────────────────────────────────
 const kitchenGuard = [
   authenticate,
   requireRole(UserRole.KITCHEN_STAFF, UserRole.WAITER, UserRole.ADMIN, UserRole.SUPER_ADMIN),
@@ -24,6 +24,8 @@ const adminGuard = [authenticate, requireRole(UserRole.ADMIN, UserRole.SUPER_ADM
 // ── Kitchen ───────────────────────────────────────────────────────────────────
 router.get('/kitchen/queue', ...kitchenGuard, orderController.getKitchenOrders);
 router.patch('/kitchen/:id/status', ...kitchenGuard, validate(updateOrderStatusSchema), orderController.updateOrderStatus);
+// Kitchen undo: POST /v1/orders/kitchen/:id/undo
+router.post('/kitchen/:id/undo', ...kitchenGuard, orderController.undoOrderStatus);
 
 // ── Admin ─────────────────────────────────────────────────────────────────────
 router.get('/admin/list', ...adminGuard, validate(orderQuerySchema, 'query'), orderController.getAdminOrders);

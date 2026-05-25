@@ -7,7 +7,7 @@ import { AuthenticatedRequest } from '../types';
 import { ApiError } from '../utils/ApiError';
 
 export const orderController = {
-  // ── Customer ──────────────────────────────────────────────────────────────────
+  // ── Customer ───────────────────────────────────────────────────────────────
 
   createOrder: asyncHandler(async (req: Request, res: Response) => {
     const { restaurantId } = req.params;
@@ -25,7 +25,7 @@ export const orderController = {
     sendSuccess(res, HTTP_STATUS.OK, tracking);
   }),
 
-  // ── Kitchen ───────────────────────────────────────────────────────────────────
+  // ── Kitchen ───────────────────────────────────────────────────────────────
 
   getKitchenOrders: asyncHandler(async (req: Request, res: Response) => {
     const restaurantId = (req as AuthenticatedRequest).user.restaurantId;
@@ -41,7 +41,19 @@ export const orderController = {
     sendSuccess(res, HTTP_STATUS.OK, updated);
   }),
 
-  // ── Admin ─────────────────────────────────────────────────────────────────────
+  /**
+   * Kitchen undo — revert the last status transition by one step.
+   * POST /v1/orders/:id/undo
+   * Body: { note?: string }
+   */
+  undoOrderStatus: asyncHandler(async (req: Request, res: Response) => {
+    const restaurantId = (req as AuthenticatedRequest).user.restaurantId;
+    if (!restaurantId) throw ApiError.forbidden('No restaurant assigned');
+    const updated = await orderService.undoOrderStatus(req.params.id, restaurantId, req.body?.note);
+    sendSuccess(res, HTTP_STATUS.OK, updated);
+  }),
+
+  // ── Admin ──────────────────────────────────────────────────────────────────
 
   getAdminOrders: asyncHandler(async (req: Request, res: Response) => {
     const restaurantId = (req as AuthenticatedRequest).user.restaurantId!;
