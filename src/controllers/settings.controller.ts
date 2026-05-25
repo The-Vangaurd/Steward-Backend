@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { settingsService } from '../services/settings.service';
+import { settingsService, SettingsPatch } from '../services/settings.service';
 import { asyncHandler } from '../utils/asyncHandler';
 import { sendSuccess } from '../utils/response';
 import { HTTP_STATUS } from '../constants';
@@ -40,7 +40,7 @@ export const settingsController = {
     const parsed = patchSchema.safeParse(req.body);
     if (!parsed.success) throw ApiError.badRequest('Invalid settings payload', 'VALIDATION_ERROR');
 
-    const settings = await settingsService.updateSettings(restaurantId, parsed.data);
+    const settings = await settingsService.updateSettings(restaurantId, parsed.data as SettingsPatch);
     sendSuccess(res, HTTP_STATUS.OK, settings);
   }),
 

@@ -111,6 +111,7 @@ export const authService = {
 
     const accessToken = signAccessToken({
       id: result.user.id,
+      email: result.user.email,
       role: result.user.role,
       restaurantId: result.restaurant.id
     });
@@ -133,6 +134,7 @@ export const authService = {
 
     const accessToken = signAccessToken({
       id: user.id,
+      email: user.email,
       role: user.role,
       restaurantId: user.restaurantId ?? null
     });
@@ -173,6 +175,7 @@ export const authService = {
     const newRefreshToken = signRefreshToken(user.id);
     const newAccessToken = signAccessToken({
       id: user.id,
+      email: user.email,
       role: user.role,
       restaurantId: user.restaurantId ?? null
     });
