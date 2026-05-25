@@ -14,7 +14,9 @@ import { initSocket } from './sockets';
 import { logger } from './utils/logger';
 import { errorHandler, notFoundHandler } from './middlewares/error.middleware';
 import { globalRateLimiter } from './middlewares/rateLimiter.middleware';
-import { startAnalyticsWorker, startAnalyticsCron } from './jobs/analytics.job';
+
+// TEMPORARILY DISABLED
+// import { startAnalyticsWorker, startAnalyticsCron } from './jobs/analytics.job';
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 import healthRouter from './routes/health.routes';
@@ -29,12 +31,16 @@ const httpServer = http.createServer(app);
 
 // ── Security & parsing ────────────────────────────────────────────────────────
 app.use(helmet());
+
 app.use(
   cors({
-    origin: env.CORS_ORIGINS.split(',').map((o) => o.trim()),
+    origin: env.CORS_ORIGINS
+      ? env.CORS_ORIGINS.split(',').map((o) => o.trim())
+      : '*',
     credentials: true,
   }),
 );
+
 app.use(compression());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -65,29 +71,55 @@ app.use(errorHandler);
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 const start = async (): Promise<void> => {
-  await connectDatabase();
-  logger.info('Database connected');
+  try {
+    console.log('Starting backend...');
+    console.log('Environment PORT:', env.PORT);
 
-  await connectRedis();
-  logger.info('Redis connected');
+    // DATABASE
+    await connectDatabase();
+    logger.info('Database connected');
 
-  initSocket(httpServer);
+    // START SERVER FIRST
+    httpServer.listen(env.PORT, '0.0.0.0', () => {
+      logger.info(`Server running on port ${env.PORT} [${env.NODE_ENV}]`);
+    });
 
-  if (env.NODE_ENV !== 'test') {
-    startAnalyticsWorker();
-    logger.info('Analytics worker started');
+    // REDIS (NON-BLOCKING)
+    try {
+      await connectRedis();
+      logger.info('Redis connected');
+    } catch (err) {
+      logger.error('Redis connection failed', {
+        error: (err as Error).message,
+      });
+    }
 
-    await startAnalyticsCron();
-    logger.info('Analytics midnight cron registered');
+    // SOCKETS
+    initSocket(httpServer);
+
+    // TEMPORARILY DISABLED
+    // if (env.NODE_ENV !== 'test') {
+    //   startAnalyticsWorker();
+    //   logger.info('Analytics worker started');
+
+    //   await startAnalyticsCron();
+    //   logger.info('Analytics midnight cron registered');
+    // }
+
+  } catch (err) {
+    logger.error('Failed to start server', {
+      error: (err as Error).message,
+      stack: (err as Error).stack,
+    });
+
+    process.exit(1);
   }
-
-  httpServer.listen(env.PORT, () => {
-    logger.info(`Server running on port ${env.PORT} [${env.NODE_ENV}]`);
-  });
 };
 
+// ── Graceful shutdown ─────────────────────────────────────────────────────────
 const shutdown = async (signal: string): Promise<void> => {
   logger.info(`Received ${signal}, shutting down gracefully`);
+
   httpServer.close(() => {
     logger.info('HTTP server closed');
     process.exit(0);
@@ -96,18 +128,22 @@ const shutdown = async (signal: string): Promise<void> => {
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
+
 process.on('uncaughtException', (err) => {
-  logger.error('Uncaught exception', { error: err.message, stack: err.stack });
+  logger.error('Uncaught exception', {
+    error: err.message,
+    stack: err.stack,
+  });
+
   process.exit(1);
 });
+
 process.on('unhandledRejection', (reason) => {
   logger.error('Unhandled rejection', { reason });
   process.exit(1);
 });
 
-start().catch((err) => {
-  logger.error('Failed to start server', { error: (err as Error).message });
-  process.exit(1);
-});
+// START APP
+start();
 
 export { app, httpServer };
