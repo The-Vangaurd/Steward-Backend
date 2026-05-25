@@ -17,6 +17,8 @@ RUN npm prune --production --legacy-peer-deps
 
 # ─── Stage 3: production runner ──────────────────────────────────────────────
 FROM node:20-alpine AS runner
+# Install libc6-compat in the runner stage so the Prisma binary can execute migrations
+RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
 ENV NODE_ENV=production
@@ -26,14 +28,14 @@ ENV PORT=4000
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
-# Only copy runtime artifacts
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/prisma ./prisma
-
-# Adjust permissions for the non-root user
+# Set up correct permissions before switching users
 RUN chown -R nextjs:nodejs /app
+
+# Safely copy runtime artifacts with correct ownership attributes
+COPY --from=builder --chown=nextjs:nodejs /app/dist ./dist
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=nextjs:nodejs /app/package.json ./package.json
+COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
 
 USER nextjs
 
