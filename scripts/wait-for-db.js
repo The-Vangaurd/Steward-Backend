@@ -60,7 +60,8 @@ async function checkConnection() {
       await prisma.$disconnect();
       process.exit(0);
     } catch (error) {
-      console.log(`⚠️ Connection attempt ${i}/${maxRetries} failed. Retrying in ${delay / 1000}s...`);
+      const errMsg = error.message ? error.message.split('\n')[0] : 'Unknown error';
+      console.log(`⚠️ Connection attempt ${i}/${maxRetries} failed: ${errMsg}. Retrying in ${delay / 1000}s...`);
       if (i === maxRetries) {
         console.error('❌ Error: Could not connect to the database after all attempts.');
         console.error(error.message);
