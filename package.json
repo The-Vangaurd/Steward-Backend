@@ -6,17 +6,16 @@
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "build": "tsc --project tsconfig.json",
+    "build:full": "prisma generate && tsc --project tsconfig.json",
     "start": "node dist/index.js",
     "lint": "eslint 'src/**/*.ts' --fix",
     "format": "prettier --write 'src/**/*.ts'",
+    "typecheck": "tsc --noEmit",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:seed": "ts-node prisma/seed.ts",
-    "prisma:studio": "prisma studio",
-    "typecheck": "tsc --noEmit",
-    "build:full": "prisma generate && tsc --project tsconfig.json",
-    "start:migrate": "node scripts/wait-for-db.js && prisma migrate deploy && node dist/index.js"
+    "prisma:studio": "prisma studio"
   },
   "prisma": {
     "schema": "prisma/schema.prisma",
