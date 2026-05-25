@@ -13,7 +13,12 @@ router.get('/', async (_req: Request, res: Response) => {
     checkRedisConnection(),
   ]);
 
-  const status = db && redis ? 'healthy' : !db && !redis ? 'unhealthy' : 'degraded';
+  const isRedisActive = !!env.REDIS_URL;
+  const status = db && (!isRedisActive || redis)
+    ? 'healthy'
+    : !db
+      ? 'unhealthy'
+      : 'degraded';
 
   sendSuccess(
     res,
@@ -23,7 +28,10 @@ router.get('/', async (_req: Request, res: Response) => {
       uptime: process.uptime(),
       timestamp: new Date().toISOString(),
       environment: env.NODE_ENV,
-      services: { database: db, redis },
+      services: { 
+        database: db, 
+        redis: isRedisActive ? redis : 'disabled' 
+      },
     },
   );
 });

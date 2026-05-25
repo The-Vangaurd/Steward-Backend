@@ -15,8 +15,7 @@ import { logger } from './utils/logger';
 import { errorHandler, notFoundHandler } from './middlewares/error.middleware';
 import { globalRateLimiter } from './middlewares/rateLimiter.middleware';
 
-// TEMPORARILY DISABLED
-// import { startAnalyticsWorker, startAnalyticsCron } from './jobs/analytics.job';
+import { startAnalyticsWorker, startAnalyticsCron } from './jobs/analytics.job';
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 import healthRouter from './routes/health.routes';
@@ -97,14 +96,20 @@ const start = async (): Promise<void> => {
     // SOCKETS
     initSocket(httpServer);
 
-    // TEMPORARILY DISABLED
-    // if (env.NODE_ENV !== 'test') {
-    //   startAnalyticsWorker();
-    //   logger.info('Analytics worker started');
+    // BACKGROUND JOBS (NON-BLOCKING)
+    if (env.NODE_ENV !== 'test') {
+      try {
+        startAnalyticsWorker();
+        logger.info('Analytics worker started');
 
-    //   await startAnalyticsCron();
-    //   logger.info('Analytics midnight cron registered');
-    // }
+        await startAnalyticsCron();
+        logger.info('Analytics midnight cron registered');
+      } catch (jobErr) {
+        logger.error('Failed to initialize background analytics jobs', {
+          error: (jobErr as Error).message,
+        });
+      }
+    }
 
   } catch (err) {
     logger.error('Failed to start server', {

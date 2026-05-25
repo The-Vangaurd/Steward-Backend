@@ -15,18 +15,49 @@ export const getIO = (): Server => {
 };
 
 export const initSocket = (httpServer: HttpServer): Server => {
-  const pubClient = new Redis(env.REDIS_URL);
-  const subClient = pubClient.duplicate();
-
   io = new Server(httpServer, {
     cors: {
-      origin: env.CORS_ORIGINS.split(',').map((o) => o.trim()),
+      origin: env.CORS_ORIGINS
+        ? env.CORS_ORIGINS.split(',').map((o) => o.trim())
+        : '*',
       credentials: true,
     },
     transports: ['websocket', 'polling'],
   });
 
-  io.adapter(createAdapter(pubClient, subClient));
+  if (env.REDIS_URL) {
+    try {
+      const pubClient = new Redis(env.REDIS_URL, {
+        maxRetriesPerRequest: 1,
+        lazyConnect: true,
+      });
+
+      pubClient.on('error', (err) => {
+        logger.error('Socket Redis pubClient error', { error: err.message });
+      });
+
+      const subClient = pubClient.duplicate();
+      subClient.on('error', (err) => {
+        logger.error('Socket Redis subClient error', { error: err.message });
+      });
+
+      io.adapter(createAdapter(pubClient, subClient));
+      logger.info('Socket.IO initialized with Redis adapter');
+
+      pubClient.connect().catch((err) => {
+        logger.error('Socket Redis connection failed', { error: err.message });
+      });
+      subClient.connect().catch((err) => {
+        logger.error('Socket Redis sub-connection failed', { error: err.message });
+      });
+    } catch (err) {
+      logger.error('Failed to initialize Redis adapter for Socket.IO, falling back to in-memory', {
+        error: (err as Error).message,
+      });
+    }
+  } else {
+    logger.info('Socket.IO initialized with in-memory adapter (Redis disabled)');
+  }
 
   // ── JWT auth middleware ──────────────────────────────────────────────────────
   io.use((socket: Socket, next) => {

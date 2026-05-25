@@ -46,5 +46,5 @@ USER nextjs
 
 EXPOSE 4000
 
-# Run migrations then start server via the package.json script
-CMD ["npm", "run", "start:migrate"]
+# Start server via the package.json start script
+CMD ["npm", "start"]

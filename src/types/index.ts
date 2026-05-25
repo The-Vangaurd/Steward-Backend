@@ -67,6 +67,6 @@ export interface HealthCheckResponse {
   environment: string;
   services: {
     database: boolean;
-    redis: boolean;
+    redis: boolean | 'disabled';
   };
 }
