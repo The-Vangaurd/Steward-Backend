@@ -6,7 +6,9 @@ import { logger } from '../utils/logger';
 
 // ── Redis connection config ────────────────────────────────────────────────────
 
-function parseRedisUrl(url: string | undefined): { host: string; port: number; password?: string; tls?: object } | undefined {
+function parseRedisUrl(
+  url: string | undefined,
+): { host: string; port: number; password?: string; tls?: object } | undefined {
   if (!url) return undefined;
   try {
     const parsed = new URL(url);
@@ -24,13 +26,22 @@ function parseRedisUrl(url: string | undefined): { host: string; port: number; p
 
 const connection = parseRedisUrl(env.REDIS_URL);
 
-// ── Queue ─────────────────────────────────────────────────────────────────────
+// ── Queues (singletons) ───────────────────────────────────────────────────────
+// PERF: Both queues are created once at module load time and reused.
+// Previously, startSessionCleanupCron() created a new Queue instance on every
+// call, leaking a Redis connection each time (each Queue opens its own socket).
 
 export const analyticsQueue = connection
   ? new Queue('analytics', { connection })
   : null;
 
-// ── Worker ────────────────────────────────────────────────────────────────────
+// PERF: Declare as module-level singleton so startSessionCleanupCron() only
+// ever opens one Redis connection for the session-cleanup queue.
+const sessionCleanupQueue = connection
+  ? new Queue('session-cleanup', { connection })
+  : null;
+
+// ── Analytics Worker ──────────────────────────────────────────────────────────
 
 export const startAnalyticsWorker = (): Worker | null => {
   if (!connection) {
@@ -42,8 +53,6 @@ export const startAnalyticsWorker = (): Worker | null => {
     const worker = new Worker(
       'analytics',
       async (job) => {
-        // Each job handler wrapped in try/catch so one failure doesn't
-        // crash the worker process and break the scheduler.
         if (job.name === 'daily-aggregate') {
           try {
             const { restaurantId, date } = job.data as { restaurantId: string; date: string };
@@ -56,7 +65,7 @@ export const startAnalyticsWorker = (): Worker | null => {
               error: (err as Error).message,
               stack: (err as Error).stack,
             });
-            throw err; // re-throw so BullMQ marks the job as failed
+            throw err;
           }
         }
 
@@ -77,13 +86,17 @@ export const startAnalyticsWorker = (): Worker | null => {
     );
 
     worker.on('failed', (job, err) => {
-      logger.error('Analytics job failed', { jobId: job?.id, name: job?.name, error: err.message });
+      logger.error('Analytics job failed', {
+        jobId: job?.id,
+        name: job?.name,
+        error: err.message,
+      });
     });
 
     worker.on('error', (err) => {
-      // Worker-level errors (e.g. Redis disconnect) are logged but do NOT
-      // crash the process — the scheduler continues running.
-      logger.error('Analytics worker error (scheduler stability preserved)', { error: err.message });
+      logger.error('Analytics worker error (scheduler stability preserved)', {
+        error: err.message,
+      });
     });
 
     return worker;
@@ -93,7 +106,7 @@ export const startAnalyticsWorker = (): Worker | null => {
   }
 };
 
-// ── Midnight cron — fires at 00:00 UTC every day ──────────────────────────────
+// ── Midnight cron ─────────────────────────────────────────────────────────────
 
 export const startAnalyticsCron = async (): Promise<void> => {
   if (!analyticsQueue) {
@@ -102,7 +115,6 @@ export const startAnalyticsCron = async (): Promise<void> => {
   }
 
   try {
-    // Remove any stale repeatable before re-registering (idempotent startup)
     const repeatables = await analyticsQueue.getRepeatableJobs();
     for (const job of repeatables) {
       if (job.name === 'midnight-cron') {
@@ -121,8 +133,6 @@ export const startAnalyticsCron = async (): Promise<void> => {
 
     logger.info('Analytics midnight cron registered');
   } catch (err) {
-    // Log but do not rethrow — a cron registration failure must not prevent
-    // the HTTP server from starting.
     logger.error('Failed to register analytics cron (non-fatal)', {
       error: (err as Error).message,
       stack: (err as Error).stack,
@@ -156,8 +166,6 @@ export const scheduleAllDailyAnalytics = async (): Promise<void> => {
           { jobId: `daily-${restaurant.id}-${dateStr}`, removeOnComplete: true },
         );
       } catch (err) {
-        // Per-restaurant failures are logged individually so one bad ID
-        // doesn't abort the rest of the batch.
         logger.error('Failed to enqueue daily-aggregate for restaurant', {
           restaurantId: restaurant.id,
           date: dateStr,
@@ -166,7 +174,9 @@ export const scheduleAllDailyAnalytics = async (): Promise<void> => {
       }
     }
 
-    logger.info(`Scheduled daily analytics for ${restaurants.length} restaurants`, { date: dateStr });
+    logger.info(`Scheduled daily analytics for ${restaurants.length} restaurants`, {
+      date: dateStr,
+    });
   } catch (err) {
     logger.error('Failed to schedule daily analytics batch', {
       error: (err as Error).message,
@@ -178,22 +188,22 @@ export const scheduleAllDailyAnalytics = async (): Promise<void> => {
 // ── Expired session cleanup cron ──────────────────────────────────────────────
 
 export const startSessionCleanupCron = async (): Promise<void> => {
-  if (!analyticsQueue) {
+  // PERF: Use the module-level singleton queue instead of creating a new Queue
+  // on every call.  The old code leaked a Redis connection each invocation.
+  if (!sessionCleanupQueue) {
     logger.warn('Session cleanup cron not registered (Queue is not initialised)');
     return;
   }
 
   try {
-    const queue = new Queue('session-cleanup', { connection: connection! });
-
-    const repeatables = await queue.getRepeatableJobs();
+    const repeatables = await sessionCleanupQueue.getRepeatableJobs();
     for (const job of repeatables) {
       if (job.name === 'cleanup-expired-sessions') {
-        await queue.removeRepeatableByKey(job.key);
+        await sessionCleanupQueue.removeRepeatableByKey(job.key);
       }
     }
 
-    await queue.add(
+    await sessionCleanupQueue.add(
       'cleanup-expired-sessions',
       {},
       {
@@ -224,6 +234,8 @@ export const startSessionCleanupCron = async (): Promise<void> => {
 
     logger.info('Session cleanup cron registered');
   } catch (err) {
-    logger.error('Failed to register session cleanup cron (non-fatal)', { error: (err as Error).message });
+    logger.error('Failed to register session cleanup cron (non-fatal)', {
+      error: (err as Error).message,
+    });
   }
 };

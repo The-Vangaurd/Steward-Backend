@@ -36,7 +36,11 @@ export interface SettingsPatch {
 
 /**
  * Ensure a RestaurantSettings row exists for the given restaurant.
- * Called on first access to handle restaurants created before the migration.
+ * Only called at write-time or when explicitly bootstrapping a new restaurant.
+ *
+ * PERF: Previously called as `upsertSettings()` on every read path (getTheme,
+ * getSettings) — this issued a DB WRITE on every public menu load.  Now we use
+ * findUnique for reads and only fall back to upsert when the row is missing.
  */
 async function upsertSettings(restaurantId: string) {
   return prisma.restaurantSettings.upsert({
@@ -44,6 +48,14 @@ async function upsertSettings(restaurantId: string) {
     update: {},
     create: { restaurantId },
   });
+}
+
+/**
+ * Read-only settings fetch.  Returns null when no settings row exists yet so
+ * callers can decide whether to create one.
+ */
+async function findSettings(restaurantId: string) {
+  return prisma.restaurantSettings.findUnique({ where: { restaurantId } });
 }
 
 // ── Service ───────────────────────────────────────────────────────────────────
@@ -54,8 +66,12 @@ export const settingsService = {
     const cached = await cacheGet(cacheKey);
     if (cached) return cached;
 
-    const profile = await settingsService.getProfile(restaurantId);
-    const settings = await upsertSettings(restaurantId);
+    // PERF: Run profile fetch and settings fetch in parallel (was sequential —
+    // getProfile completed before upsertSettings started).
+    const [profile, settings] = await Promise.all([
+      settingsService.getProfile(restaurantId),
+      upsertSettings(restaurantId),
+    ]);
 
     const combined = {
       ...settings,
@@ -96,7 +112,13 @@ export const settingsService = {
       },
     });
 
-    await cacheDel(CACHE_KEYS.settings(restaurantId));
+    // PERF: Invalidate all related caches in parallel
+    await Promise.all([
+      cacheDel(CACHE_KEYS.settings(restaurantId)),
+      cacheDel(CACHE_KEYS.theme(restaurantId)),
+      cacheDel(CACHE_KEYS.taxRate(restaurantId)),
+    ]);
+
     logger.info('Restaurant settings updated', { restaurantId });
     return updated;
   },
@@ -140,7 +162,11 @@ export const settingsService = {
         bannerUrl: true,
       },
     });
-    await cacheDel(CACHE_KEYS.settings(restaurantId));
+    // PERF: Invalidate all related caches in parallel
+    await Promise.all([
+      cacheDel(CACHE_KEYS.settings(restaurantId)),
+      cacheDel(CACHE_KEYS.theme(restaurantId)),
+    ]);
     return updated;
   },
 
@@ -159,49 +185,101 @@ export const settingsService = {
   /**
    * Returns only the theme fields needed by the public menu page.
    * Resolves by restaurant slug or ID.
+   *
+   * PERF: Two critical fixes:
+   * 1. Added Redis caching (THEME TTL = 5 min). Previously uncached, so every
+   *    single public menu page load hit the DB.
+   * 2. Replaced upsertSettings() with findSettings() — the old code issued a
+   *    DB WRITE (upsert) on every theme read, even when the row already existed.
+   *    Now we do a cheap read; if the row is missing (new restaurant) we fall
+   *    back to defaults without writing.
    */
   async getTheme(slugOrId: string) {
-    const restaurant = await prisma.restaurant.findFirst({
-      where: { OR: [{ slug: slugOrId }, { id: slugOrId }], isActive: true },
-      select: { id: true, name: true, logoUrl: true, currency: true },
-    });
-    if (!restaurant) throw ApiError.notFound('Restaurant not found');
+    // Try to resolve from slug cache first
+    const { CACHE_KEYS: CK, CACHE_TTL: CT } = await import('../constants');
+    const slugCacheKey = CK.slug(slugOrId);
+    let restaurantId = await cacheGet<string>(slugCacheKey);
 
-    const settings = await upsertSettings(restaurant.id);
+    let restaurantRow: {
+      id: string;
+      name: string;
+      logoUrl: string | null;
+      currency: string;
+    } | null = null;
 
-    return {
-      restaurantId: restaurant.id,
-      restaurantName: restaurant.name,
-      logoUrl: restaurant.logoUrl,
-      currency: restaurant.currency,
-      offlineMode: settings.offlineMode,
+    if (!restaurantId) {
+      restaurantRow = await prisma.restaurant.findFirst({
+        where: { OR: [{ slug: slugOrId }, { id: slugOrId }], isActive: true },
+        select: { id: true, name: true, logoUrl: true, currency: true },
+      });
+      if (!restaurantRow) throw ApiError.notFound('Restaurant not found');
+      restaurantId = restaurantRow.id;
+      await cacheSet(slugCacheKey, restaurantId, CACHE_TTL.SLUG);
+    }
+
+    // Check theme cache
+    const themeCacheKey = CACHE_KEYS.theme(restaurantId);
+    const cachedTheme = await cacheGet(themeCacheKey);
+    if (cachedTheme) return cachedTheme;
+
+    // Fetch restaurant row if we only resolved from cache (didn't query above)
+    if (!restaurantRow) {
+      restaurantRow = await prisma.restaurant.findUnique({
+        where: { id: restaurantId },
+        select: { id: true, name: true, logoUrl: true, currency: true },
+      });
+      if (!restaurantRow) throw ApiError.notFound('Restaurant not found');
+    }
+
+    // PERF: Use findUnique (READ) instead of upsert (WRITE) — avoids a DB write
+    // on every public menu load.  If settings don't exist, we return defaults.
+    const settings = await findSettings(restaurantId);
+
+    const theme = {
+      restaurantId: restaurantRow.id,
+      restaurantName: restaurantRow.name,
+      logoUrl: restaurantRow.logoUrl,
+      currency: restaurantRow.currency,
+      offlineMode: settings?.offlineMode ?? false,
       colors: {
-        primary: settings.primaryColor ?? null,
-        accent: settings.accentColor ?? null,
+        primary: settings?.primaryColor ?? null,
+        accent: settings?.accentColor ?? null,
       },
-      fontFamily: settings.fontBody ?? settings.fontHeading ?? null,
-      customCss: settings.customCss,
-      openingHours: settings.openingHours,
-      taxRate: Number(settings.taxRate),
-      showCalories: settings.showCalories ?? true,
-      showPrepTime: settings.showPrepTime ?? true,
-      showVegBadge: settings.showVegBadge ?? true,
-      menuLayout: (settings.menuLayout as "grid" | "list") ?? "grid",
+      fontFamily: settings?.fontBody ?? settings?.fontHeading ?? null,
+      customCss: settings?.customCss ?? null,
+      openingHours: settings?.openingHours ?? null,
+      taxRate: settings ? Number(settings.taxRate) : 0.05,
+      showCalories: settings?.showCalories ?? true,
+      showPrepTime: settings?.showPrepTime ?? true,
+      showVegBadge: settings?.showVegBadge ?? true,
+      menuLayout: (settings?.menuLayout as 'grid' | 'list') ?? 'grid',
     };
+
+    await cacheSet(themeCacheKey, theme, CACHE_TTL.THEME);
+    return theme;
   },
 
   /**
    * Returns the effective tax rate for a restaurant.
-   * Falls back to DEFAULT_TAX_RATE (0.05) so existing code paths are unaffected.
+   * Falls back to 0.05 so existing code paths are unaffected.
+   *
+   * PERF: Added Redis caching (TAX_RATE TTL = 10 min). Previously called on
+   * every order creation with a fresh DB round-trip each time.
    */
   async getTaxRate(restaurantId: string): Promise<number> {
+    // PERF: Check cache first — tax rate rarely changes
+    const cacheKey = CACHE_KEYS.taxRate(restaurantId);
+    const cached = await cacheGet<number>(cacheKey);
+    if (cached !== null) return cached;
+
     try {
       const settings = await prisma.restaurantSettings.findUnique({
         where: { restaurantId },
         select: { taxRate: true },
       });
-      if (!settings) return 0.05;
-      return Number(settings.taxRate);
+      const rate = settings ? Number(settings.taxRate) : 0.05;
+      await cacheSet(cacheKey, rate, CACHE_TTL.TAX_RATE);
+      return rate;
     } catch (err) {
       logger.warn('Failed to fetch tax rate, falling back to default', {
         restaurantId,

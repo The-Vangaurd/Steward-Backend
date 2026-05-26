@@ -102,13 +102,34 @@ export const CACHE_KEYS = {
   analytics: (restaurantId: string, date: string) =>
     `analytics:${restaurantId}:${date}`,
   settings: (restaurantId: string) => `settings:${restaurantId}`,
+  // NEW — theme is fetched by every public menu page load; cache aggressively
+  theme: (restaurantId: string) => `theme:${restaurantId}`,
+  // NEW — slug→restaurantId mapping; slugs never change after creation
+  slug: (slug: string) => `slug:${slug}`,
+  // NEW — tax rate per restaurant; changes rarely
+  taxRate: (restaurantId: string) => `taxRate:${restaurantId}`,
+  // NEW — kitchen queue; short TTL so staff always see fresh data
+  kitchenOrders: (restaurantId: string) => `kitchen_orders:${restaurantId}`,
+  // NEW — analytics sub-keys for series/hourly/topItems
+  analyticsSummary: (restaurantId: string, from: string, to: string) =>
+    `analytics:summary:${restaurantId}:${from}:${to}`,
+  analyticsRevenue: (restaurantId: string, from: string, to: string) =>
+    `analytics:revenue:${restaurantId}:${from}:${to}`,
+  analyticsTopItems: (restaurantId: string, from: string, to: string) =>
+    `analytics:top_items:${restaurantId}:${from}:${to}`,
+  analyticsHourly: (restaurantId: string, from: string, to: string) =>
+    `analytics:hourly:${restaurantId}:${from}:${to}`,
 } as const;
 
 export const CACHE_TTL = {
-  MENU: 300,        // 5 minutes
-  CATEGORIES: 600,  // 10 minutes
-  RESTAURANT: 3600, // 1 hour
-  ORDER: 60,        // 1 minute
-  ANALYTICS: 1800,  // 30 minutes
-  SETTINGS: 600,    // 10 minutes
+  MENU: 300,          // 5 minutes
+  CATEGORIES: 600,    // 10 minutes
+  RESTAURANT: 3600,   // 1 hour
+  ORDER: 60,          // 1 minute
+  ANALYTICS: 1800,    // 30 minutes
+  SETTINGS: 600,      // 10 minutes
+  THEME: 300,         // 5 minutes — public menu theme
+  SLUG: 3600,         // 1 hour — slug→id rarely changes
+  TAX_RATE: 600,      // 10 minutes — tax rate rarely changes
+  KITCHEN_ORDERS: 10, // 10 seconds — kitchen needs near-real-time data
 } as const;

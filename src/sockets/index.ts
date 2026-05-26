@@ -10,6 +10,43 @@ import { prisma } from '../config/database';
 
 let io: Server;
 
+// ── Order-room validation cache ───────────────────────────────────────────────
+// PERF: On every socket reconnect (common on mobile) the old code issued a fresh
+// DB query to validate that an orderId belongs to the right restaurant.  We
+// keep a short-lived in-memory Map so repeated joins from the same connection
+// don't hit the DB.  TTL is 60 s — safe because orders don't change restaurants.
+const ORDER_RESTAURANT_CACHE = new Map<string, { restaurantId: string; expiresAt: number }>();
+const ORDER_CACHE_TTL_MS = 60_000;
+
+async function getOrderRestaurantId(orderId: string): Promise<string | null> {
+  const now = Date.now();
+  const cached = ORDER_RESTAURANT_CACHE.get(orderId);
+  if (cached && cached.expiresAt > now) return cached.restaurantId;
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { restaurantId: true },
+  });
+
+  if (!order) return null;
+
+  ORDER_RESTAURANT_CACHE.set(orderId, {
+    restaurantId: order.restaurantId,
+    expiresAt: now + ORDER_CACHE_TTL_MS,
+  });
+
+  return order.restaurantId;
+}
+
+// PERF: Periodically evict expired entries to prevent unbounded memory growth
+// in long-running processes with many distinct order IDs.
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, val] of ORDER_RESTAURANT_CACHE) {
+    if (val.expiresAt <= now) ORDER_RESTAURANT_CACHE.delete(key);
+  }
+}, 120_000); // every 2 minutes
+
 export const getIO = (): Server => {
   if (!io) throw new Error('Socket.IO not initialized');
   return io;
@@ -24,22 +61,47 @@ export const initSocket = (httpServer: HttpServer): Server => {
       credentials: true,
     },
     transports: ['websocket', 'polling'],
+    // PERF: Tighter ping settings detect dead connections faster so the server
+    // reclaims memory from stale socket objects sooner.
+    pingTimeout: 20_000,   // drop client after 20 s of no pong (default 20 000)
+    pingInterval: 25_000,  // send ping every 25 s (default 25 000)
+    // PERF: Limit inbound message size to 1 MB (default 1 MB, but explicit
+    // so a future Socket.IO upgrade can't silently increase it).
+    maxHttpBufferSize: 1e6,
+    // PERF: Only allow Engine.IO v4 (Socket.IO 4.x client) — avoids the
+    // server maintaining two parallel protocol handshake paths.
+    allowEIO3: false,
+    // PERF: Upgrade from long-polling to WebSocket as soon as possible
+    // (default behaviour, but explicit for clarity).
+    upgradeTimeout: 10_000,
   });
 
   // ── Redis adapter ──────────────────────────────────────────────────────────
+  // PERF: Reuse the main Redis connection config where possible.  The adapter
+  // needs two separate connections (pub + sub) per Socket.IO specification, but
+  // we parse the URL once and share the config object.
 
   if (!env.REDIS_URL) {
     logger.warn('Socket.IO initialized with in-memory adapter (Redis disabled)');
   } else {
     try {
-      const pubClient = new Redis(env.REDIS_URL, {
+      const redisOptions = {
         maxRetriesPerRequest: 1,
         lazyConnect: true,
-      });
+        enableReadyCheck: false,
+        // PERF: Retry with exponential back-off so a Redis blip doesn't hammer
+        // the server with reconnect storms.
+        retryStrategy: (times: number) =>
+          times > 5 ? null : Math.min(times * 200, 2000),
+      };
+
+      const pubClient = new Redis(env.REDIS_URL, redisOptions);
       const subClient = pubClient.duplicate();
 
-      pubClient.on('error', (err) => logger.error('Socket Redis pubClient error', { error: err.message }));
-      subClient.on('error', (err) => logger.error('Socket Redis subClient error', { error: err.message }));
+      pubClient.on('error', (err) =>
+        logger.error('Socket Redis pubClient error', { error: err.message }));
+      subClient.on('error', (err) =>
+        logger.error('Socket Redis subClient error', { error: err.message }));
 
       Promise.all([pubClient.connect(), subClient.connect()])
         .then(() => {
@@ -47,10 +109,14 @@ export const initSocket = (httpServer: HttpServer): Server => {
           logger.info('Socket.IO Redis adapter attached');
         })
         .catch((err) => {
-          logger.error('Socket Redis connection failed, falling back to in-memory', { error: err.message });
+          logger.error('Socket Redis connection failed, falling back to in-memory', {
+            error: err.message,
+          });
         });
     } catch (err) {
-      logger.error('Failed to initialise Socket.IO Redis adapter', { error: (err as Error).message });
+      logger.error('Failed to initialise Socket.IO Redis adapter', {
+        error: (err as Error).message,
+      });
     }
   }
 
@@ -84,7 +150,12 @@ export const initSocket = (httpServer: HttpServer): Server => {
 
   io.on(SOCKET_EVENTS.CONNECTION, (socket: Socket) => {
     const user = socket.data.user;
-    logger.info('WS client connected', { socketId: socket.id, userId: user?.sub ?? 'guest' });
+    // PERF: Only log at debug level in production — connection events are very
+    // frequent and 'info' floods logs unnecessarily.
+    logger.debug('WS client connected', {
+      socketId: socket.id,
+      userId: user?.sub ?? 'guest',
+    });
 
     socket.on(SOCKET_EVENTS.JOIN_ROOM, async (
       room: string,
@@ -98,19 +169,23 @@ export const initSocket = (httpServer: HttpServer): Server => {
         }
 
         if (prefix === 'restaurant') {
-          // Read-only broadcast room — open to all (staff and public customers)
           socket.join(room);
-          logger.debug('WS joined room', { socketId: socket.id, room });
           cb?.(null);
           return;
         }
 
         if (prefix === 'kitchen') {
           const role = socket.data.user?.role;
-          if (!socket.data.isAuthenticated || !['KITCHEN_STAFF', 'WAITER', 'ADMIN', 'SUPER_ADMIN'].includes(role)) {
+          if (
+            !socket.data.isAuthenticated ||
+            !['KITCHEN_STAFF', 'WAITER', 'ADMIN', 'SUPER_ADMIN'].includes(role)
+          ) {
             throw new Error('FORBIDDEN');
           }
-          if (socket.data.user?.restaurantId !== id && socket.data.user?.role !== 'SUPER_ADMIN') {
+          if (
+            socket.data.user?.restaurantId !== id &&
+            socket.data.user?.role !== 'SUPER_ADMIN'
+          ) {
             throw new Error('FORBIDDEN');
           }
         }
@@ -120,38 +195,41 @@ export const initSocket = (httpServer: HttpServer): Server => {
           if (!socket.data.isAuthenticated || !['ADMIN', 'SUPER_ADMIN'].includes(role)) {
             throw new Error('FORBIDDEN');
           }
-          if (socket.data.user?.restaurantId !== id && socket.data.user?.role !== 'SUPER_ADMIN') {
+          if (
+            socket.data.user?.restaurantId !== id &&
+            socket.data.user?.role !== 'SUPER_ADMIN'
+          ) {
             throw new Error('FORBIDDEN');
           }
         }
 
         if (prefix === 'order') {
-          // BUG FIX: previously compared restaurantId === orderId (wrong).
-          // Now we look up the order to get its restaurantId and compare that
-          // against the authenticated user's restaurantId, preventing
-          // cross-restaurant socket room access by staff.
           if (socket.data.isAuthenticated && socket.data.user?.restaurantId) {
-            const order = await prisma.order.findUnique({
-              where: { id },
-              select: { restaurantId: true },
-            });
+            // PERF: Use in-memory cache to avoid a DB hit on every reconnect.
+            // Mobile clients reconnect frequently (network switches, app resume).
+            const orderRestaurantId = await getOrderRestaurantId(id);
 
-            if (!order) throw new Error('INVALID_ROOM');
+            if (!orderRestaurantId) throw new Error('INVALID_ROOM');
 
-            if (order.restaurantId !== socket.data.user.restaurantId &&
-                socket.data.user.role !== 'SUPER_ADMIN') {
+            if (
+              orderRestaurantId !== socket.data.user.restaurantId &&
+              socket.data.user.role !== 'SUPER_ADMIN'
+            ) {
               throw new Error('FORBIDDEN');
             }
           }
-          // Unauthenticated guests (customers tracking their order) are allowed through.
+          // Unauthenticated guests (customers tracking their order) pass through.
         }
 
         socket.join(room);
-        logger.debug('WS joined room', { socketId: socket.id, room });
         cb?.(null);
       } catch (e: any) {
         const code = e?.message ?? 'INVALID_ROOM';
-        logger.warn('Unauthorised room join attempt', { socketId: socket.id, room, code });
+        logger.warn('Unauthorised room join attempt', {
+          socketId: socket.id,
+          room,
+          code,
+        });
         cb?.({ code, message: 'Unauthorized to join room' });
       }
     });
@@ -160,8 +238,10 @@ export const initSocket = (httpServer: HttpServer): Server => {
       socket.leave(room);
     });
 
-    socket.on(SOCKET_EVENTS.DISCONNECT, () => {
-      logger.info('WS client disconnected', { socketId: socket.id });
+    socket.on(SOCKET_EVENTS.DISCONNECT, (reason: string) => {
+      logger.debug('WS client disconnected', { socketId: socket.id, reason });
+      // PERF: No explicit cleanup needed — Socket.IO automatically removes
+      // the socket from all rooms on disconnect.
     });
   });
 

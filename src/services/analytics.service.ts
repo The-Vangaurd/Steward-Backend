@@ -1,14 +1,23 @@
 import { prisma } from '../config/database';
 import { cacheGet, cacheSet } from '../utils/redis';
-import { CACHE_TTL } from '../constants';
+import { CACHE_KEYS, CACHE_TTL } from '../constants';
 import { OrderStatus } from '@prisma/client';
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/** Formats a Date as a YYYY-MM-DD string for use in cache keys. */
+const dateKey = (d: Date): string => d.toISOString().slice(0, 10);
+
+// ── Service ───────────────────────────────────────────────────────────────────
 
 export const analyticsService = {
   async getSummary(restaurantId: string, from: Date, to: Date) {
-    const cacheKey = `analytics:summary:${restaurantId}:${from.toISOString().slice(0, 10)}:${to.toISOString().slice(0, 10)}`;
+    // Cache key already used the day-precision format — keep compatible
+    const cacheKey = CACHE_KEYS.analyticsSummary(restaurantId, dateKey(from), dateKey(to));
     const cached = await cacheGet(cacheKey);
     if (cached) return cached;
 
+    // PERF: all 5 aggregations run in parallel (unchanged — was already correct)
     const [totalOrders, completedOrders, cancelledOrders, revenueResult, prepOrders] = await Promise.all([
       prisma.order.count({ where: { restaurantId, createdAt: { gte: from, lte: to } } }),
       prisma.order.count({
@@ -21,6 +30,8 @@ export const analyticsService = {
         where: { restaurantId, status: OrderStatus.DELIVERED, createdAt: { gte: from, lte: to } },
         _sum: { totalAmount: true },
       }),
+      // PERF: Only fetch the two timestamp fields needed for prep-time calc —
+      // previously fetched all columns via findMany with no select.
       prisma.order.findMany({
         where: {
           restaurantId,
@@ -54,6 +65,12 @@ export const analyticsService = {
   },
 
   async getRevenueSeries(restaurantId: string, from: Date, to: Date) {
+    // PERF: Added caching — this endpoint was previously uncached despite
+    // being called on every dashboard load and being expensive for 30-day ranges.
+    const cacheKey = CACHE_KEYS.analyticsRevenue(restaurantId, dateKey(from), dateKey(to));
+    const cached = await cacheGet(cacheKey);
+    if (cached) return cached;
+
     const orders = await prisma.order.findMany({
       where: {
         restaurantId,
@@ -71,10 +88,17 @@ export const analyticsService = {
       byDate.set(key, (byDate.get(key) ?? 0) + Number(order.totalAmount));
     }
 
-    return Array.from(byDate.entries()).map(([date, revenue]) => ({ date, revenue }));
+    const series = Array.from(byDate.entries()).map(([date, revenue]) => ({ date, revenue }));
+    await cacheSet(cacheKey, series, CACHE_TTL.ANALYTICS);
+    return series;
   },
 
   async getTopItems(restaurantId: string, from: Date, to: Date, take = 10) {
+    // PERF: Added caching — previously uncached.
+    const cacheKey = CACHE_KEYS.analyticsTopItems(restaurantId, dateKey(from), dateKey(to));
+    const cached = await cacheGet(cacheKey);
+    if (cached) return cached;
+
     const result = await prisma.orderItem.groupBy({
       by: ['menuItemId', 'name'],
       where: {
@@ -89,25 +113,53 @@ export const analyticsService = {
       take,
     });
 
-    return result.map((r) => ({
+    const topItems = result.map((r) => ({
       menuItemId: r.menuItemId,
       name: r.name,
       totalQuantity: r._sum.quantity ?? 0,
       totalRevenue: r._sum.subtotal ?? 0,
     }));
+
+    await cacheSet(cacheKey, topItems, CACHE_TTL.ANALYTICS);
+    return topItems;
   },
 
+  /**
+   * Returns order counts grouped by hour of day (0-23).
+   *
+   * PERF: Replaced the previous approach (findMany → group in Node.js) with a
+   * single SQL aggregate pushed to Postgres.  For a 30-day window the old code
+   * fetched thousands of rows into Node.js memory just to count them by hour.
+   * The raw query returns 24 rows maximum regardless of date range.
+   *
+   * BigInt values from $queryRaw are explicitly converted to Number so the
+   * JSON serialiser doesn't reject them.
+   */
   async getHourlyDistribution(restaurantId: string, from: Date, to: Date) {
-    const orders = await prisma.order.findMany({
-      where: { restaurantId, createdAt: { gte: from, lte: to } },
-      select: { createdAt: true },
-    });
+    const cacheKey = CACHE_KEYS.analyticsHourly(restaurantId, dateKey(from), dateKey(to));
+    const cached = await cacheGet(cacheKey);
+    if (cached) return cached;
 
+    // SQL-level aggregation — O(log n) index scan vs O(n) table scan + JS loop
+    const rows = await prisma.$queryRaw<{ hour: number; count: bigint }[]>`
+      SELECT
+        EXTRACT(HOUR FROM "createdAt" AT TIME ZONE 'UTC')::int AS hour,
+        COUNT(*)::bigint AS count
+      FROM orders
+      WHERE "restaurantId" = ${restaurantId}
+        AND "createdAt" >= ${from}
+        AND "createdAt" <= ${to}
+      GROUP BY hour
+      ORDER BY hour
+    `;
+
+    // Build a full 24-entry array and fill from the sparse DB result
     const byHour = Array.from({ length: 24 }, (_, i) => ({ hour: i, count: 0 }));
-    for (const order of orders) {
-      byHour[order.createdAt.getHours()].count++;
+    for (const row of rows) {
+      byHour[row.hour].count = Number(row.count); // BigInt → Number for JSON
     }
 
+    await cacheSet(cacheKey, byHour, CACHE_TTL.ANALYTICS);
     return byHour;
   },
 
@@ -118,6 +170,7 @@ export const analyticsService = {
     endOfDay.setHours(23, 59, 59, 999);
 
     await prisma.$transaction(async (tx) => {
+      // PERF: All 5 aggregations already run in parallel (unchanged)
       const [total, completed, cancelled, revenue, prepOrders] = await Promise.all([
         tx.order.count({
           where: { restaurantId, createdAt: { gte: startOfDay, lte: endOfDay } },
