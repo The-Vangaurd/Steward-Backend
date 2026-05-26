@@ -78,6 +78,9 @@ export const orderService = {
           tableNumber: input.tableNumber,
           notes: input.notes,
           deliveryAddress: input.deliveryAddress,
+          customerName: input.customerName,
+          customerPhone: input.customerPhone,
+          customerEmail: input.customerEmail,
           subtotal,
           taxAmount,
           totalAmount,
@@ -126,6 +129,15 @@ export const orderService = {
         readyAt: true,
         deliveredAt: true,
         cancelledAt: true,
+        items: {
+          select: {
+            id: true,
+            name: true,
+            price: true,
+            quantity: true,
+            notes: true,
+          },
+        },
         statusHistory: { orderBy: { createdAt: 'asc' }, select: { status: true, note: true, createdAt: true } },
       },
     });
@@ -276,7 +288,11 @@ export const orderService = {
     const pagination = parsePagination(query.page, query.limit);
 
     const where: Record<string, unknown> = { restaurantId };
-    if (query.status)    where.status    = query.status;
+    if (query.status) {
+      where.status = Array.isArray(query.status)
+        ? { in: query.status }
+        : query.status;
+    }
     if (query.orderType) where.orderType = query.orderType;
     if (query.from || query.to) {
       where.createdAt = {

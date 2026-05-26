@@ -91,6 +91,19 @@ model RestaurantSettings {
   openingHours    Json?
   /// When true the menu page shows an "ordering unavailable" banner.
   offlineMode     Boolean  @default(false)
+  
+  autoAcceptOrders   Boolean  @default(false)
+  estimatedPrepMins  Int      @default(20)
+  offlineModeMessage String?  @db.VarChar(500)
+  serviceChargeLabel String?  @db.VarChar(100)
+  notifyOnNewOrder   Boolean  @default(true)
+  notifyOnLowStock   Boolean  @default(false)
+  notifyEmail        String?  @db.VarChar(255)
+  
+  showCalories       Boolean  @default(true)
+  showPrepTime       Boolean  @default(true)
+  showVegBadge       Boolean  @default(true)
+  menuLayout         String   @default("grid") @db.VarChar(20)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

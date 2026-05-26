@@ -29,5 +29,45 @@ services:
       timeout: 5s
       retries: 5
 
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports: ["4000:4000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    environment:
+      NODE_ENV: development
+      PORT: 4000
+      DATABASE_URL: postgresql://restaurant:restaurant_dev@postgres:5432/restaurant_db
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: local-dev-jwt-secret-change-in-prod
+      JWT_REFRESH_SECRET: local-dev-refresh-secret-change-in-prod
+      JWT_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 7d
+      CORS_ORIGINS: "http://localhost:3000,http://localhost:3001"
+    command: ["node", "dist/index.js"]
+
+  steward-admin:
+    build:
+      context: ../Steward-Admin
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:4000/v1
+        NEXT_PUBLIC_WS_URL: http://localhost:4000
+    ports: ["3001:3001"]
+    depends_on: [backend]
+
+  steward-menu:
+    build:
+      context: ../Steward-Menu
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_BACKEND_URL: http://localhost:4000/v1
+        NEXT_PUBLIC_WS_URL: http://localhost:4000
+    ports: ["3000:3000"]
+    depends_on: [backend]
+
 volumes:
   pgdata:

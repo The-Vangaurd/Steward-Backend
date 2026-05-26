@@ -1,0 +1,13 @@
+-- AlterTable
+ALTER TABLE "restaurant_settings" 
+ADD COLUMN "autoAcceptOrders" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN "estimatedPrepMins" INTEGER NOT NULL DEFAULT 20,
+ADD COLUMN "offlineModeMessage" VARCHAR(500),
+ADD COLUMN "serviceChargeLabel" VARCHAR(100),
+ADD COLUMN "notifyOnNewOrder" BOOLEAN NOT NULL DEFAULT true,
+ADD COLUMN "notifyOnLowStock" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN "notifyEmail" VARCHAR(255),
+ADD COLUMN "showCalories" BOOLEAN NOT NULL DEFAULT true,
+ADD COLUMN "showPrepTime" BOOLEAN NOT NULL DEFAULT true,
+ADD COLUMN "showVegBadge" BOOLEAN NOT NULL DEFAULT true,
+ADD COLUMN "menuLayout" VARCHAR(20) NOT NULL DEFAULT 'grid';
