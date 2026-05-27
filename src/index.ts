@@ -54,7 +54,7 @@ app.use(
       }
       
       // Dynamic Vercel branch preview deployment support
-      const isOwnVercelPreview = /^https:\/\/steward-(admin|menu)-[a-z0-9-]+-itz-k[a-z0-9-]*\.vercel\.app$/.test(origin);
+      const isOwnVercelPreview = /^https:\/\/steward-(admin|menu)-[a-z0-9-]+\.vercel\.app$/.test(origin);
       if (isOwnVercelPreview) {
         return callback(null, true);
       }
