@@ -145,10 +145,13 @@ function buildCombinedSettings(
 
 export const settingsService = {
   async getSettings(restaurantId: string) {
-    const cacheKey = CACHE_KEYS.settings(restaurantId);
-    const cached = await cacheGet(cacheKey);
-    if (cached) return cached;
+  const cacheKey = CACHE_KEYS.settings(restaurantId);
+  const cached = await cacheGet(cacheKey);
 
+  if (cached) return cached;
+
+    // PERF: Run profile fetch and settings fetch in parallel (was sequential —
+    // getProfile completed before upsertSettings started).
     const [profile, settings] = await Promise.all([
       settingsService.getProfile(restaurantId),
       upsertSettings(restaurantId),
