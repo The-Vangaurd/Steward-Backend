@@ -75,6 +75,8 @@ export const settingsService = {
 
     const combined = {
       ...settings,
+      taxRate: settings ? Number(settings.taxRate) * 100 : 5,
+      serviceCharge: settings ? Number(settings.serviceCharge) * 100 : 0,
       name: profile.name,
       tagline: profile.description,
       email: profile.email,
@@ -103,12 +105,14 @@ export const settingsService = {
       where: { restaurantId },
       update: {
         ...patch,
-        taxRate: patch.taxRate !== undefined ? patch.taxRate : undefined,
-        serviceCharge: patch.serviceCharge !== undefined ? patch.serviceCharge : undefined,
+        taxRate: patch.taxRate !== undefined ? patch.taxRate / 100 : undefined,
+        serviceCharge: patch.serviceCharge !== undefined ? patch.serviceCharge / 100 : undefined,
       },
       create: {
-        restaurantId,
         ...patch,
+        restaurantId,
+        taxRate: patch.taxRate !== undefined ? patch.taxRate / 100 : 0.05,
+        serviceCharge: patch.serviceCharge !== undefined ? patch.serviceCharge / 100 : 0.00,
       },
     });
 
@@ -120,7 +124,11 @@ export const settingsService = {
     ]);
 
     logger.info('Restaurant settings updated', { restaurantId });
-    return updated;
+    return {
+      ...updated,
+      taxRate: Number(updated.taxRate) * 100,
+      serviceCharge: Number(updated.serviceCharge) * 100,
+    };
   },
 
   async getProfile(restaurantId: string) {

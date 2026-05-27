@@ -8,8 +8,8 @@ import { z } from 'zod';
 import { ApiError } from '../utils/ApiError';
 
 const patchSchema = z.object({
-  taxRate: z.number().min(0).max(1).optional(),
-  serviceCharge: z.number().min(0).max(1).optional(),
+  taxRate: z.number().min(0).max(100).optional(),
+  serviceCharge: z.number().min(0).max(100).optional(),
   primaryColor: z.string().max(20).nullable().optional(),
   secondaryColor: z.string().max(20).nullable().optional(),
   accentColor: z.string().max(20).nullable().optional(),
