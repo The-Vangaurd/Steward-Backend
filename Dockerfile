@@ -46,5 +46,5 @@ USER nextjs
 
 EXPOSE 4000
 
-# Start server via the package.json start script
-CMD ["npm", "start"]
+# Apply pending migrations before starting the server.
+CMD ["sh", "-c", "npx prisma migrate deploy && npm start"]
