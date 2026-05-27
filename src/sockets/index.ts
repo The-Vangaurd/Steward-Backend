@@ -58,14 +58,14 @@ export const initSocket = (httpServer: HttpServer): Server => {
       origin: (origin, callback) => {
         if (!origin) return callback(null, true);
         const allowedOrigins = env.CORS_ORIGINS
-          ? env.CORS_ORIGINS.split(',').map((o) => o.trim())
+          ? env.CORS_ORIGINS.split(',').map((o) => o.replace(/['"]/g, '').trim())
           : [];
         if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
           return callback(null, true);
         }
         
         // Support Vercel PR/branch preview deployments
-        const isOwnVercelPreview = /^https:\/\/steward-(admin|menu)-[a-z0-9]+-itz-k\.vercel\.app$/.test(origin);
+        const isOwnVercelPreview = /^https:\/\/steward-(admin|menu)-[a-z0-9-]+-itz-k[a-z0-9-]*\.vercel\.app$/.test(origin);
         if (isOwnVercelPreview) {
           return callback(null, true);
         }
