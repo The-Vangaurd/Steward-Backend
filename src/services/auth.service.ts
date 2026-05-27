@@ -38,9 +38,32 @@ async function generateUniqueSlug(baseName: string): Promise<string> {
 // ─── Auth service ─────────────────────────────────────────────────────────────
 
 export const authService = {
-  async register(input: RegisterInput) {
+  /**
+   * Staff registration — ADMIN-only endpoint.
+   *
+   * Creates a KITCHEN_STAFF (or specified role) user and associates them with
+   * the calling admin's restaurant. This prevents the "no restaurantId" bug
+   * where a staff user could log in but receive 403 on every settings request.
+   *
+   * The `restaurantId` is injected by the controller from the authenticated
+   * admin's JWT — staff cannot choose their own restaurant association.
+   */
+  async register(input: RegisterInput, restaurantId: string) {
+    if (!restaurantId) {
+      throw ApiError.forbidden(
+        'Cannot create staff account: the calling admin has no restaurant association.',
+      );
+    }
+
     const existing = await prisma.user.findUnique({ where: { email: input.email } });
     if (existing) throw ApiError.conflict('Email already registered', 'EMAIL_ALREADY_EXISTS');
+
+    // Verify the target restaurant exists
+    const restaurant = await prisma.restaurant.findUnique({
+      where: { id: restaurantId },
+      select: { id: true },
+    });
+    if (!restaurant) throw ApiError.notFound('Restaurant not found');
 
     const passwordHash = await bcrypt.hash(input.password, SALT_ROUNDS);
 
@@ -52,6 +75,7 @@ export const authService = {
         lastName: input.lastName,
         phone: input.phone,
         role: UserRole.KITCHEN_STAFF,
+        restaurantId,
       },
       select: {
         id: true,
@@ -72,7 +96,6 @@ export const authService = {
     const slug = await generateUniqueSlug(input.restaurantName);
     const passwordHash = await bcrypt.hash(input.password, SALT_ROUNDS);
 
-    // Split ownerName into firstName and lastName for the User record
     const nameParts = input.ownerName.trim().split(/\s+/);
     const firstName = nameParts[0];
     const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
@@ -82,10 +105,8 @@ export const authService = {
         data: {
           name: input.restaurantName,
           slug,
-          // Reusing user phone/email since specific restaurant fields don't exist on OwnerRegisterInput
           phone: input.phone,
           email: input.email,
-          // Bootstrap default settings row alongside the restaurant
           settings: { create: {} },
         },
       });
@@ -113,7 +134,7 @@ export const authService = {
       id: result.user.id,
       email: result.user.email,
       role: result.user.role,
-      restaurantId: result.restaurant.id
+      restaurantId: result.restaurant.id,
     });
     const refreshToken = signRefreshToken(result.user.id);
 
@@ -136,7 +157,7 @@ export const authService = {
       id: user.id,
       email: user.email,
       role: user.role,
-      restaurantId: user.restaurantId ?? null
+      restaurantId: user.restaurantId ?? null,
     });
     const refreshToken = signRefreshToken(user.id);
 
@@ -153,9 +174,6 @@ export const authService = {
     };
   },
 
-  /**
-   * Refresh access + refresh tokens.
-   */
   async refresh(refreshToken: string) {
     const payload = verifyRefreshToken(refreshToken);
     const targetUserId = payload.sub;
@@ -168,13 +186,12 @@ export const authService = {
     const user = await prisma.user.findUnique({ where: { id: targetUserId } });
     if (!user || !user.isActive) throw ApiError.unauthorized('User not found or inactive');
 
-    // Rotate: delete old session, create a new one
     const newRefreshToken = signRefreshToken(user.id);
     const newAccessToken = signAccessToken({
       id: user.id,
       email: user.email,
       role: user.role,
-      restaurantId: user.restaurantId ?? null
+      restaurantId: user.restaurantId ?? null,
     });
 
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
