@@ -28,6 +28,7 @@ import settingsRouter  from './routes/settings.routes';
 import themeRouter     from './routes/theme.routes';
 
 const app = express();
+app.set('trust proxy', 1); // Trust reverse proxy headers (Render TLS termination)
 const httpServer = http.createServer(app);
 
 // ── Security & parsing ────────────────────────────────────────────────────────
@@ -49,10 +50,17 @@ app.use(
         ? env.CORS_ORIGINS.split(',').map((o) => o.trim())
         : [];
       if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
+        return callback(null, true);
       }
+      
+      // Dynamic Vercel branch preview deployment support
+      const isVercelPreview = origin.endsWith('.vercel.app');
+      if (isVercelPreview) {
+        return callback(null, true);
+      }
+      
+      // Clean browser-level rejection without throwing server logs exceptions
+      callback(null, false);
     },
     credentials: true,
     // PERF: Cache preflight for 24 hours to avoid OPTIONS round-trips on every

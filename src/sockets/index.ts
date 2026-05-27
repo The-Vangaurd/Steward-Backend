@@ -55,9 +55,23 @@ export const getIO = (): Server => {
 export const initSocket = (httpServer: HttpServer): Server => {
   io = new Server(httpServer, {
     cors: {
-      origin: env.CORS_ORIGINS
-        ? env.CORS_ORIGINS.split(',').map((o) => o.trim())
-        : '*',
+      origin: (origin, callback) => {
+        if (!origin) return callback(null, true);
+        const allowedOrigins = env.CORS_ORIGINS
+          ? env.CORS_ORIGINS.split(',').map((o) => o.trim())
+          : [];
+        if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+          return callback(null, true);
+        }
+        
+        // Support Vercel PR/branch preview deployments
+        const isVercelPreview = origin.endsWith('.vercel.app');
+        if (isVercelPreview) {
+          return callback(null, true);
+        }
+        
+        callback(null, false);
+      },
       credentials: true,
     },
     transports: ['websocket', 'polling'],
