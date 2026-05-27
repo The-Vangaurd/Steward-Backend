@@ -48,3 +48,5 @@ export const checkRedisConnection = async (): Promise<boolean> => {
     return false;
   }
 };
+
+export const redisClient = redis;

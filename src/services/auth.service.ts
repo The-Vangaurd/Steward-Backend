@@ -157,11 +157,8 @@ export const authService = {
    * Refresh access + refresh tokens.
    */
   async refresh(refreshToken: string) {
-    // Cast to any to safely extract ID depending on your jwt utility's exact return type
-    const payload: any = verifyRefreshToken(refreshToken);
-    if (!payload) throw ApiError.unauthorized('Invalid or expired refresh token');
-
-    const targetUserId = typeof payload === 'string' ? payload : (payload.id || payload.sub);
+    const payload = verifyRefreshToken(refreshToken);
+    const targetUserId = payload.sub;
 
     const session = await prisma.session.findUnique({ where: { refreshToken } });
     if (!session || session.expiresAt < new Date()) {

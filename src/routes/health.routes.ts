@@ -7,6 +7,8 @@ import { sendSuccess } from '../utils/response';
 
 const router = Router();
 
+// SECURE: Report live status for both database and Redis.
+// Keeps HTTP status as 200 on Redis failures to report degraded health without triggering orchestration restarts.
 router.get('/', async (_req: Request, res: Response) => {
   const [db, redis] = await Promise.all([
     checkDatabaseConnection(),

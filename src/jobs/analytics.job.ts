@@ -3,6 +3,27 @@ import { env } from '../config/env';
 import { analyticsService } from '../services/analytics.service';
 import { prisma } from '../config/database';
 import { logger } from '../utils/logger';
+import { redisClient } from '../config/redis';
+
+const LOCK_KEY = 'analytics:cron:lock';
+const LOCK_TTL_SECONDS = 60;
+
+async function withAnalyticsLock(fn: () => Promise<void>): Promise<void> {
+  if (!redisClient) {
+    await fn();
+    return;
+  }
+  const acquired = await (redisClient as any).set(LOCK_KEY, '1', 'EX', LOCK_TTL_SECONDS, 'NX');
+  if (!acquired) {
+    logger.info('Analytics cron skipped - another instance is running it');
+    return;
+  }
+  try {
+    await fn();
+  } finally {
+    await (redisClient as any).del(LOCK_KEY);
+  }
+}
 
 // ── Redis connection config ────────────────────────────────────────────────────
 
@@ -71,7 +92,9 @@ export const startAnalyticsWorker = (): Worker | null => {
 
         if (job.name === 'midnight-cron') {
           try {
-            await scheduleAllDailyAnalytics();
+            await withAnalyticsLock(async () => {
+              await scheduleAllDailyAnalytics();
+            });
           } catch (err) {
             logger.error('midnight-cron job failed', {
               jobId: job.id,

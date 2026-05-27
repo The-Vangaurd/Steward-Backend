@@ -65,8 +65,8 @@ export const initSocket = (httpServer: HttpServer): Server => {
         }
         
         // Support Vercel PR/branch preview deployments
-        const isVercelPreview = origin.endsWith('.vercel.app');
-        if (isVercelPreview) {
+        const isOwnVercelPreview = /^https:\/\/steward-(admin|menu)-[a-z0-9]+-itz-k\.vercel\.app$/.test(origin);
+        if (isOwnVercelPreview) {
           return callback(null, true);
         }
         

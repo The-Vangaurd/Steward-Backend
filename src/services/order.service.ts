@@ -100,11 +100,13 @@ export const orderService = {
       ? Number(restaurant.settings.taxRate)
       : 0.05; // fallback matches settingsService.getTaxRate
 
-    // PERF: select only the 5 fields needed for order creation — previously
-    // fetched all ~15 columns including imageUrl, description, etc.
+    // SECURE & PERF: Validate every menu item in the order belongs to the restaurant.
+    // We also select 'price' from the database to enforce database-derived pricing,
+    // explicitly ignoring any client-submitted pricing fields to prevent pricing tampering.
     const menuItemIds = input.items.map((i) => i.menuItemId);
+    const uniqueMenuItemIds = Array.from(new Set(menuItemIds));
     const menuItems = await prisma.menuItem.findMany({
-      where: { id: { in: menuItemIds }, category: { restaurantId } },
+      where: { id: { in: uniqueMenuItemIds }, category: { restaurantId } },
       select: {
         id: true,
         name: true,
@@ -114,8 +116,11 @@ export const orderService = {
       },
     });
 
-    if (menuItems.length !== menuItemIds.length) {
-      throw ApiError.notFound('One or more menu items not found');
+    if (menuItems.length !== uniqueMenuItemIds.length) {
+      throw ApiError.badRequest(
+        'One or more menu items are invalid or unavailable for this restaurant',
+        'INVALID_MENU_ITEMS',
+      );
     }
 
     const unavailable = menuItems.filter((m) => !m.isAvailable);

@@ -5,6 +5,7 @@ import { ApiError } from '../utils/ApiError';
 import { logger } from '../utils/logger';
 import { Prisma } from '@prisma/client';
 import { cloudinary } from '../config/cloudinary';
+import { sanitizeCSS } from '../utils/cssUtils';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -101,16 +102,20 @@ export const settingsService = {
     });
     if (!restaurant) throw ApiError.notFound('Restaurant not found');
 
+    const customCss = patch.customCss ? sanitizeCSS(patch.customCss) : patch.customCss;
+
     const updated = await prisma.restaurantSettings.upsert({
       where: { restaurantId },
       update: {
         ...patch,
+        customCss,
         taxRate: patch.taxRate !== undefined ? patch.taxRate / 100 : undefined,
         serviceCharge: patch.serviceCharge !== undefined ? patch.serviceCharge / 100 : undefined,
       },
       create: {
         ...patch,
         restaurantId,
+        customCss,
         taxRate: patch.taxRate !== undefined ? patch.taxRate / 100 : 0.05,
         serviceCharge: patch.serviceCharge !== undefined ? patch.serviceCharge / 100 : 0.00,
       },

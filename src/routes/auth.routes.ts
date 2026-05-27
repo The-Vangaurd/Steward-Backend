@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authController } from '../controllers/auth.controller';
 import { validate } from '../middlewares/validate.middleware';
 import { authenticate } from '../middlewares/auth.middleware';
+import { requireRole } from '../middlewares/rbac.middleware';
 import { authRateLimiter } from '../middlewares/rateLimiter.middleware';
 import {
   loginSchema,
@@ -13,7 +14,14 @@ import {
 const router = Router();
 
 // ── Staff registration (existing — KITCHEN_STAFF) ──────────────────────────
-router.post('/register', authRateLimiter, validate(registerSchema), authController.register);
+router.post(
+  '/register',
+  authRateLimiter,
+  authenticate,
+  requireRole('ADMIN', 'SUPER_ADMIN'),
+  validate(registerSchema),
+  authController.register,
+);
 
 // ── Owner + restaurant registration (new) ──────────────────────────────────
 router.post(
