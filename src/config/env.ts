@@ -121,6 +121,27 @@ if (data.NODE_ENV === 'production') {
     );
     process.exit(1);
   }
+
+  // Prevent localhost/dev origins from reaching production. If CORS_ORIGINS
+  // is not set in Render's environment variables it defaults to localhost,
+  // and every API call from the production Vercel frontend will be rejected.
+  const allLocalhostOrEmpty =
+    !data.CORS_ORIGINS ||
+    data.CORS_ORIGINS
+      .split(',')
+      .map((o) => o.trim().toLowerCase())
+      .every((o) => !o || o.includes('localhost') || o.includes('127.0.0.1'));
+
+  if (allLocalhostOrEmpty) {
+    console.error(
+      '❌ CORS_ORIGINS is not configured for production.\n' +
+      'Current value: ' + (data.CORS_ORIGINS || '(empty)') + '\n' +
+      'Set it in Render → Environment Variables to your real frontend URLs, e.g.:\n' +
+      '   CORS_ORIGINS=https://your-admin.vercel.app,https://your-menu.vercel.app\n' +
+      'Without this every cross-origin API request from the frontend is rejected.',
+    );
+    process.exit(1);
+  }
 }
 
 // ── Redis placeholder detection ───────────────────────────────────────────────

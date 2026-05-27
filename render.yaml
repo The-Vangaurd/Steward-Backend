@@ -5,37 +5,57 @@ services:
     region: singapore
     plan: starter
     buildCommand: npm ci --legacy-peer-deps && npx prisma generate && npm run build
+    # Run migrations as a pre-start step so a failed migration blocks startup
+    # rather than silently running against a partially-migrated schema.
     startCommand: npx prisma migrate deploy && node dist/index.js
     healthCheckPath: /health
     autoDeploy: true
     envVars:
       - key: NODE_ENV
         value: production
+
       - key: DATABASE_URL
-        sync: false
+        sync: false   # ← Set in Render dashboard: your Supabase/Postgres connection string
+
       - key: REDIS_URL
-        sync: false
+        sync: false   # ← Set in Render dashboard: your Upstash rediss:// URL with real password
+
       - key: JWT_SECRET
-        sync: false
+        sync: false   # ← Set in Render dashboard: a random 64+ char string
+
       - key: JWT_REFRESH_SECRET
-        sync: false
+        sync: false   # ← Set in Render dashboard: a different random 64+ char string
+
       - key: JWT_EXPIRES_IN
         value: 15m
+
       - key: JWT_REFRESH_EXPIRES_IN
         value: 7d
+
+      # REQUIRED — the backend will refuse to start in production without this.
+      # Set to your actual Vercel frontend URLs, comma-separated, e.g.:
+      #   https://steward-admin.vercel.app,https://steward-menu.vercel.app
+      # Without this, every API call from the frontend is blocked by CORS.
       - key: CORS_ORIGINS
-        sync: false
+        sync: false   # ← MUST be set in Render dashboard — see comment above
+
       - key: CLOUDINARY_CLOUD_NAME
-        sync: false
+        sync: false   # ← Optional: enables logo/banner uploads
+
       - key: CLOUDINARY_API_KEY
         sync: false
+
       - key: CLOUDINARY_API_SECRET
         sync: false
+
       - key: RESEND_API_KEY
-        sync: false
+        sync: false   # ← Optional: enables email notifications
+
       - key: FROM_EMAIL
         sync: false
+
       - key: RATE_LIMIT_WINDOW_MS
         value: "900000"
+
       - key: RATE_LIMIT_MAX
         value: "100"

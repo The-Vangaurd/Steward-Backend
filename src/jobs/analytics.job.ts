@@ -47,19 +47,43 @@ function parseRedisUrl(
 
 const connection = parseRedisUrl(env.REDIS_URL);
 
-// ── Queues (singletons) ───────────────────────────────────────────────────────
-// PERF: Both queues are created once at module load time and reused.
-// Previously, startSessionCleanupCron() created a new Queue instance on every
-// call, leaking a Redis connection each time (each Queue opens its own socket).
+// ── Queues and workers (module-level singletons) ────────────────────────────
+// All Queue and Worker instances are created once at module evaluation time.
+// Creating them inside async functions leaks Redis connections on every call
+// because each Queue/Worker opens its own ioredis socket.
 
 export const analyticsQueue = connection
   ? new Queue('analytics', { connection })
   : null;
 
-// PERF: Declare as module-level singleton so startSessionCleanupCron() only
-// ever opens one Redis connection for the session-cleanup queue.
 const sessionCleanupQueue = connection
   ? new Queue('session-cleanup', { connection })
+  : null;
+
+// Session cleanup worker is a singleton — not created inside startSessionCleanupCron
+// so that calling that function more than once doesn't spin up duplicate workers.
+const sessionCleanupWorker = connection
+  ? (() => {
+      const w = new Worker(
+        'session-cleanup',
+        async () => {
+          try {
+            const { count } = await prisma.session.deleteMany({
+              where: { expiresAt: { lt: new Date() } },
+            });
+            logger.info('Expired sessions cleaned up', { deletedCount: count });
+          } catch (err) {
+            logger.error('Session cleanup job failed', { error: (err as Error).message });
+            throw err;
+          }
+        },
+        { connection },
+      );
+      w.on('error', (err) => {
+        logger.error('Session cleanup worker error', { error: err.message });
+      });
+      return w;
+    })()
   : null;
 
 // ── Analytics Worker ──────────────────────────────────────────────────────────
@@ -235,25 +259,11 @@ export const startSessionCleanupCron = async (): Promise<void> => {
       },
     );
 
-    const worker = new Worker(
-      'session-cleanup',
-      async () => {
-        try {
-          const { count } = await prisma.session.deleteMany({
-            where: { expiresAt: { lt: new Date() } },
-          });
-          logger.info('Expired sessions cleaned up', { deletedCount: count });
-        } catch (err) {
-          logger.error('Session cleanup job failed', { error: (err as Error).message });
-          throw err;
-        }
-      },
-      { connection: connection! },
-    );
-
-    worker.on('error', (err) => {
-      logger.error('Session cleanup worker error', { error: err.message });
-    });
+    // Worker is a module-level singleton (sessionCleanupWorker above).
+    // No need to create it here — it is already listening on the queue.
+    if (!sessionCleanupWorker) {
+      logger.warn('Session cleanup worker is null despite queue being initialised');
+    }
 
     logger.info('Session cleanup cron registered');
   } catch (err) {
