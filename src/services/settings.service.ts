@@ -33,6 +33,23 @@ export interface SettingsPatch {
   menuLayout?: string;
 }
 
+const LEGACY_SETTINGS_SELECT = {
+  id: true,
+  restaurantId: true,
+  taxRate: true,
+  serviceCharge: true,
+  primaryColor: true,
+  secondaryColor: true,
+  accentColor: true,
+  fontHeading: true,
+  fontBody: true,
+  customCss: true,
+  openingHours: true,
+  offlineMode: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.RestaurantSettingsSelect;
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
@@ -48,6 +65,7 @@ async function upsertSettings(restaurantId: string) {
     where: { restaurantId },
     update: {},
     create: { restaurantId },
+    select: LEGACY_SETTINGS_SELECT,
   });
 }
 
@@ -56,7 +74,10 @@ async function upsertSettings(restaurantId: string) {
  * callers can decide whether to create one.
  */
 async function findSettings(restaurantId: string) {
-  return prisma.restaurantSettings.findUnique({ where: { restaurantId } });
+  return prisma.restaurantSettings.findUnique({
+    where: { restaurantId },
+    select: LEGACY_SETTINGS_SELECT,
+  });
 }
 
 // ── Service ───────────────────────────────────────────────────────────────────
@@ -262,10 +283,10 @@ export const settingsService = {
       customCss: settings?.customCss ?? null,
       openingHours: settings?.openingHours ?? null,
       taxRate: settings ? Number(settings.taxRate) : 0.05,
-      showCalories: settings?.showCalories ?? true,
-      showPrepTime: settings?.showPrepTime ?? true,
-      showVegBadge: settings?.showVegBadge ?? true,
-      menuLayout: (settings?.menuLayout as 'grid' | 'list') ?? 'grid',
+      showCalories: true,
+      showPrepTime: true,
+      showVegBadge: true,
+      menuLayout: 'grid' as const,
     };
 
     await cacheSet(themeCacheKey, theme, CACHE_TTL.THEME);
