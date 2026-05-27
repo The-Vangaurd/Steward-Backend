@@ -9,6 +9,7 @@ import {
   registerSchema,
   refreshTokenSchema,
   ownerRegisterSchema,
+  staffLoginSchema,
 } from '../validators/auth.validator';
 
 const router = Router();
@@ -23,7 +24,7 @@ router.post(
   authController.register,
 );
 
-// ── Owner + restaurant registration (new) ──────────────────────────────────
+// ── Owner + restaurant registration (existing) ─────────────────────────────
 router.post(
   '/owner-register',
   authRateLimiter,
@@ -31,8 +32,15 @@ router.post(
   authController.registerOwner,
 );
 
-// ── Existing auth routes ────────────────────────────────────────────────────
+// ── Owner / admin email + password login (existing) ────────────────────────
 router.post('/login', authRateLimiter, validate(loginSchema), authController.login);
+
+// ── Staff restaurant-code + PIN login (NEW) ────────────────────────────────
+// Intentionally uses the same authRateLimiter as email login to prevent
+// brute-force against the 4-digit PIN space (10,000 combinations).
+router.post('/staff-login', authRateLimiter, validate(staffLoginSchema), authController.staffLogin);
+
+// ── Token management ───────────────────────────────────────────────────────
 router.post('/refresh', validate(refreshTokenSchema), authController.refresh);
 router.post('/logout', authController.logout);
 router.get('/me', authenticate, authController.me);

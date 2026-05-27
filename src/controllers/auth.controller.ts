@@ -18,6 +18,18 @@ const getCookieOptions = () => {
   };
 };
 
+/** Staff sessions use a shorter 12-hour shift window. */
+const getStaffCookieOptions = () => {
+  const isProd = env.NODE_ENV === 'production';
+  return {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: (isProd ? 'none' : 'lax') as 'none' | 'lax',
+    maxAge: 12 * 60 * 60 * 1000, // 12 hours — one shift
+    path: '/v1/auth/refresh',
+  };
+};
+
 const getClearCookieOptions = () => {
   const isProd = env.NODE_ENV === 'production';
   return {
@@ -31,7 +43,7 @@ const getClearCookieOptions = () => {
 export const authController = {
   // ── Existing: staff registration ──────────────────────────────────────────
   register: asyncHandler(async (req: Request, res: Response) => {
-    const user = await authService.register(req.body);
+    const user = await authService.register(req.body, (req as AuthenticatedRequest).user?.restaurantId ?? '');
     sendSuccess(res, HTTP_STATUS.CREATED, user);
   }),
 
@@ -39,7 +51,6 @@ export const authController = {
   registerOwner: asyncHandler(async (req: Request, res: Response) => {
     const result = await authService.registerOwner(req.body);
 
-    // Issue refresh token cookie (same shape as login)
     res.cookie('refreshToken', result.refreshToken, getCookieOptions());
 
     sendSuccess(res, HTTP_STATUS.CREATED, {
@@ -49,7 +60,7 @@ export const authController = {
     });
   }),
 
-  // ── Existing: login ───────────────────────────────────────────────────────
+  // ── Existing: owner/admin email+password login ─────────────────────────────
   login: asyncHandler(async (req: Request, res: Response) => {
     const result = await authService.login(req.body);
 
@@ -58,6 +69,22 @@ export const authController = {
     sendSuccess(res, HTTP_STATUS.OK, {
       accessToken: result.accessToken,
       user: result.user,
+    });
+  }),
+
+  // ── NEW: staff restaurant-code + PIN login ─────────────────────────────────
+  staffLogin: asyncHandler(async (req: Request, res: Response) => {
+    const result = await authService.loginStaff(req.body);
+
+    // Staff refresh cookie is scoped to one shift (12 h).
+    // The same /v1/auth/refresh endpoint works — the shorter expiry is enforced
+    // at the session level in the DB, not just in the cookie.
+    res.cookie('refreshToken', result.refreshToken, getStaffCookieOptions());
+
+    sendSuccess(res, HTTP_STATUS.OK, {
+      accessToken: result.accessToken,
+      user: result.user,
+      restaurant: result.restaurant,
     });
   }),
 

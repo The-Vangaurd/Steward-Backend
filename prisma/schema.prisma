@@ -41,20 +41,23 @@ enum KitchenType {
 // ─── Models ──────────────────────────────────────────────────────────────────
 
 model Restaurant {
-  id          String   @id @default(cuid())
-  name        String   @db.VarChar(255)
-  slug        String   @unique @db.VarChar(100)
-  description String?  @db.Text
-  logoUrl     String?
-  bannerUrl   String?
-  address     Json?
-  phone       String?  @db.VarChar(20)
-  email       String?  @db.VarChar(255)
-  timezone    String   @default("Asia/Kolkata") @db.VarChar(50)
-  currency    String   @default("INR") @db.VarChar(10)
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id             String   @id @default(cuid())
+  name           String   @db.VarChar(255)
+  slug           String   @unique @db.VarChar(100)
+  /// 6-character alphanumeric code staff use to identify their restaurant at login.
+  /// Auto-generated on restaurant creation. e.g. "ABC123"
+  restaurantCode String   @unique @db.VarChar(20)
+  description    String?  @db.Text
+  logoUrl        String?
+  bannerUrl      String?
+  address        Json?
+  phone          String?  @db.VarChar(20)
+  email          String?  @db.VarChar(255)
+  timezone       String   @default("Asia/Kolkata") @db.VarChar(50)
+  currency       String   @default("INR") @db.VarChar(10)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   categories Category[]
   orders     Order[]
@@ -129,6 +132,11 @@ model User {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
+  /// bcrypt-hashed 4-digit PIN for staff tablet login.
+  /// Only set for KITCHEN_STAFF and WAITER roles.
+  /// Never returned in API responses.
+  staffPin     String?
+
   restaurant Restaurant? @relation(fields: [restaurantId], references: [id], onDelete: SetNull)
   sessions   Session[]
 
@@ -167,9 +175,7 @@ model Category {
   menuItems  MenuItem[]
 
   // Perf: public menu query filters (restaurantId, isActive) and sorts by sortOrder
-  // Composite covers all three in a single index scan
   @@index([restaurantId, isActive, sortOrder])
-  // Kept for backward-compat with any non-isActive admin queries
   @@index([restaurantId, sortOrder])
   @@map("categories")
 }
@@ -194,9 +200,6 @@ model MenuItem {
   category   Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   orderItems OrderItem[]
 
-  // Perf: public menu filters isAvailable and sorts by sortOrder within a category
-  // Replaces the separate [categoryId, sortOrder] and [isAvailable] indexes with
-  // one composite that serves all three query shapes
   @@index([categoryId, isAvailable, sortOrder])
   @@map("menu_items")
 }
@@ -229,12 +232,8 @@ model Order {
   items         OrderItem[]
   statusHistory OrderStatusHistory[]
 
-  // Perf: kitchen queue and admin list filter by (restaurantId, status)
   @@index([restaurantId, status])
-  // Perf: admin list sorts/filters by createdAt within a restaurant
   @@index([restaurantId, createdAt])
-  // Perf: analytics queries filter by (restaurantId, status, createdAt) together
-  // — covers COUNT, SUM, and findMany with all three predicates in a single scan
   @@index([restaurantId, status, createdAt])
   @@map("orders")
 }
@@ -253,7 +252,6 @@ model OrderItem {
   menuItem MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Restrict)
 
   @@index([orderId])
-  // Perf: analytics groupBy(['menuItemId', 'name']) needs this to avoid seq-scan
   @@index([menuItemId])
   @@map("order_items")
 }
