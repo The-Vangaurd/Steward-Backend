@@ -12,7 +12,7 @@ const getCookieOptions = () => {
   return {
     httpOnly: true,
     secure: isProd,
-    sameSite: (isProd ? 'none' : 'lax') as const,
+    sameSite: (isProd ? 'none' : 'lax') as 'none' | 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000,
     path: '/v1/auth/refresh',
   };
@@ -23,7 +23,7 @@ const getClearCookieOptions = () => {
   return {
     httpOnly: true,
     secure: isProd,
-    sameSite: (isProd ? 'none' : 'lax') as const,
+    sameSite: (isProd ? 'none' : 'lax') as 'none' | 'lax',
     path: '/v1/auth/refresh',
   };
 };
