@@ -50,6 +50,21 @@ const LEGACY_SETTINGS_SELECT = {
   updatedAt: true,
 } satisfies Prisma.RestaurantSettingsSelect;
 
+function toLegacySettingsPatch(patch: SettingsPatch) {
+  return {
+    taxRate: patch.taxRate !== undefined ? patch.taxRate / 100 : undefined,
+    serviceCharge: patch.serviceCharge !== undefined ? patch.serviceCharge / 100 : undefined,
+    primaryColor: patch.primaryColor,
+    secondaryColor: patch.secondaryColor,
+    accentColor: patch.accentColor,
+    fontHeading: patch.fontHeading,
+    fontBody: patch.fontBody,
+    customCss: patch.customCss,
+    openingHours: patch.openingHours,
+    offlineMode: patch.offlineMode,
+  };
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
@@ -124,22 +139,18 @@ export const settingsService = {
     if (!restaurant) throw ApiError.notFound('Restaurant not found');
 
     const customCss = patch.customCss ? sanitizeCSS(patch.customCss) : patch.customCss;
+    const legacyPatch = toLegacySettingsPatch({ ...patch, customCss });
 
     const updated = await prisma.restaurantSettings.upsert({
       where: { restaurantId },
-      update: {
-        ...patch,
-        customCss,
-        taxRate: patch.taxRate !== undefined ? patch.taxRate / 100 : undefined,
-        serviceCharge: patch.serviceCharge !== undefined ? patch.serviceCharge / 100 : undefined,
-      },
+      update: legacyPatch,
       create: {
-        ...patch,
         restaurantId,
-        customCss,
-        taxRate: patch.taxRate !== undefined ? patch.taxRate / 100 : 0.05,
-        serviceCharge: patch.serviceCharge !== undefined ? patch.serviceCharge / 100 : 0.00,
+        ...legacyPatch,
+        taxRate: legacyPatch.taxRate ?? 0.05,
+        serviceCharge: legacyPatch.serviceCharge ?? 0.00,
       },
+      select: LEGACY_SETTINGS_SELECT,
     });
 
     // PERF: Invalidate all related caches in parallel
