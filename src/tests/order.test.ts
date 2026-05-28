@@ -54,15 +54,15 @@ const mockMenuItems = [
 
 const validOrderInput = {
   items: [
-    { menuItemId: 'item-abc', quantity: 2, notes: null },
-    { menuItemId: 'item-def', quantity: 1, notes: null },
+    { menuItemId: 'item-abc', quantity: 2, notes: undefined },
+    { menuItemId: 'item-def', quantity: 1, notes: undefined },
   ],
   orderType: 'DINE_IN' as const,
   tableNumber: '5',
-  notes: null,
+  notes: undefined,
   customerName: 'Test Customer',
-  customerPhone: null,
-  deliveryAddress: null,
+  customerPhone: undefined,
+  deliveryAddress: undefined,
 };
 
 const mockCreatedOrder = {
@@ -169,8 +169,8 @@ describe('orderService.createOrder — price tamper prevention', () => {
     const duplicateInput = {
       ...validOrderInput,
       items: [
-        { menuItemId: 'item-abc', quantity: 1, notes: null },
-        { menuItemId: 'item-abc', quantity: 2, notes: null },
+        { menuItemId: 'item-abc', quantity: 1, notes: undefined },
+        { menuItemId: 'item-abc', quantity: 2, notes: undefined },
       ],
     };
     (prisma.menuItem.findMany as jest.Mock).mockResolvedValue([mockMenuItems[0]]);

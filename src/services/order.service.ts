@@ -16,9 +16,8 @@ import {
 // ── Minimal select shapes ─────────────────────────────────────────────────────
 
 /**
- * Fields needed by the kitchen queue display.
- * Deliberately excludes customer PII and financial totals — kitchen only needs
- * item names, quantities, prep info and status.
+ * Fields needed by the kitchen kanban board.
+ * Includes startedPreparingAt so the frontend timer works locally.
  */
 const KITCHEN_ORDER_SELECT = {
   id: true,
@@ -29,6 +28,7 @@ const KITCHEN_ORDER_SELECT = {
   notes: true,
   estimatedMins: true,
   createdAt: true,
+  startedPreparingAt: true,
   items: {
     select: {
       id: true,
@@ -40,10 +40,6 @@ const KITCHEN_ORDER_SELECT = {
   },
 } as const;
 
-/**
- * Fields returned after a status update.  Keeps statusHistory for the
- * order-tracking panel but only the fields that the clients actually render.
- */
 const ORDER_WITH_HISTORY_SELECT = {
   id: true,
   orderNumber: true,
@@ -58,10 +54,9 @@ const ORDER_WITH_HISTORY_SELECT = {
   taxAmount: true,
   totalAmount: true,
   estimatedMins: true,
-  confirmedAt: true,
-  preparedAt: true,
+  startedPreparingAt: true,
   readyAt: true,
-  deliveredAt: true,
+  completedAt: true,
   cancelledAt: true,
   createdAt: true,
   updatedAt: true,
@@ -83,9 +78,6 @@ const ORDER_WITH_HISTORY_SELECT = {
 
 export const orderService = {
   async createOrder(slugOrId: string, input: CreateOrderInput) {
-    // PERF: single query fetches restaurant + settings together, eliminating
-    // the previous sequential restaurant.findFirst → getTaxRate(restaurantId)
-    // chain (was 2 round-trips, now 1).
     const restaurant = await prisma.restaurant.findFirst({
       where: { OR: [{ slug: slugOrId }, { id: slugOrId }], isActive: true },
       select: {
@@ -98,11 +90,8 @@ export const orderService = {
     const restaurantId = restaurant.id;
     const taxRate = restaurant.settings
       ? Number(restaurant.settings.taxRate)
-      : 0.05; // fallback matches settingsService.getTaxRate
+      : 0.05;
 
-    // SECURE & PERF: Validate every menu item in the order belongs to the restaurant.
-    // We also select 'price' from the database to enforce database-derived pricing,
-    // explicitly ignoring any client-submitted pricing fields to prevent pricing tampering.
     const menuItemIds = input.items.map((i) => i.menuItemId);
     const uniqueMenuItemIds = Array.from(new Set(menuItemIds));
     const menuItems = await prisma.menuItem.findMany({
@@ -131,7 +120,6 @@ export const orderService = {
       );
     }
 
-    // Build order items with snapshot pricing
     const itemMap = new Map(menuItems.map((m) => [m.id, m]));
     const orderItems = input.items.map((i) => {
       const mi = itemMap.get(i.menuItemId)!;
@@ -157,7 +145,7 @@ export const orderService = {
         data: {
           orderNumber,
           restaurantId,
-          status: OrderStatus.PENDING,
+          status: OrderStatus.NEW,
           orderType: input.orderType,
           tableNumber: input.tableNumber,
           notes: input.notes,
@@ -171,31 +159,20 @@ export const orderService = {
           estimatedMins: maxPrep + 5,
           items: { create: orderItems },
           statusHistory: {
-            create: { status: OrderStatus.PENDING, note: 'Order placed' },
+            create: { status: OrderStatus.NEW, note: 'Order placed' },
           },
         },
-        // PERF: Use select instead of broad include — avoids pulling statusHistory
-        // (just written above) back over the wire; kitchen only needs item names.
         select: ORDER_WITH_HISTORY_SELECT,
       }),
     ]);
 
-    // PERF: Invalidate kitchen cache so the new order appears immediately
     await cacheDel(CACHE_KEYS.kitchenOrders(restaurantId));
 
-    // PERF: Emit lean kitchen payload (just what kitchen display needs)
-    const kitchenPayload = {
-      id: order.id,
-      orderNumber: order.orderNumber,
-      status: order.status,
-      tableNumber: order.tableNumber,
-      orderType: order.orderType,
-      estimatedMins: order.estimatedMins,
-      createdAt: order.createdAt,
-      items: order.items,
-    };
-    emitToKitchen(restaurantId, SOCKET_EVENTS.KITCHEN_NEW_ORDER, kitchenPayload);
-    emitToRestaurant(restaurantId, SOCKET_EVENTS.ORDER_CREATED, kitchenPayload);
+    // Broadcaster: Emit to clean socket events and legacy events
+    // Send full populated order object to eliminate client roundtrip calls
+    emitToKitchen(restaurantId, SOCKET_EVENTS.ORDER_CREATED, order); // 'order_created'
+    emitToKitchen(restaurantId, SOCKET_EVENTS.KITCHEN_NEW_ORDER, order); // legacy 'kitchen:new_order'
+    emitToRestaurant(restaurantId, SOCKET_EVENTS.ORDER_CREATED_LEGACY, order); // legacy 'order:created'
 
     return order;
   },
@@ -224,10 +201,9 @@ export const orderService = {
         status: true,
         estimatedMins: true,
         createdAt: true,
-        confirmedAt: true,
-        preparedAt: true,
+        startedPreparingAt: true,
         readyAt: true,
-        deliveredAt: true,
+        completedAt: true,
         cancelledAt: true,
         items: {
           select: {
@@ -255,8 +231,13 @@ export const orderService = {
     input: UpdateOrderStatusInput,
   ) {
     const updated = await prisma.$transaction(async (tx) => {
-      const order = await tx.order.findFirst({ where: { id: orderId, restaurantId } });
-      if (!order) throw ApiError.notFound('Order not found');
+      const order = await tx.order.findUnique({
+        where: { id: orderId },
+        select: { id: true, status: true, restaurantId: true },
+      });
+      if (!order || order.restaurantId !== restaurantId) {
+        throw ApiError.notFound('Order not found');
+      }
 
       const allowed = getAllowedOrderStatusTransitions(order.status);
       if (!isValidOrderStatusTransition(order.status, input.status)) {
@@ -266,12 +247,12 @@ export const orderService = {
         );
       }
 
+      // Timestamp each transition
       const timestamps: Record<string, Date> = {};
-      if (input.status === OrderStatus.CONFIRMED) timestamps.confirmedAt = new Date();
-      if (input.status === OrderStatus.PREPARING)  timestamps.preparedAt  = new Date();
-      if (input.status === OrderStatus.READY)      timestamps.readyAt     = new Date();
-      if (input.status === OrderStatus.DELIVERED)  timestamps.deliveredAt = new Date();
-      if (input.status === OrderStatus.CANCELLED)  timestamps.cancelledAt = new Date();
+      if (input.status === OrderStatus.PREPARING)  timestamps.startedPreparingAt = new Date();
+      if (input.status === OrderStatus.READY)      timestamps.readyAt            = new Date();
+      if (input.status === OrderStatus.COMPLETED)  timestamps.completedAt        = new Date();
+      if (input.status === OrderStatus.CANCELLED)  timestamps.cancelledAt        = new Date();
 
       const updateResult = await tx.order.updateMany({
         where: { id: orderId, status: order.status },
@@ -289,7 +270,6 @@ export const orderService = {
         data: { orderId, status: input.status, note: input.note },
       });
 
-      // PERF: Use select (not include) to fetch only what clients render
       const refreshed = await tx.order.findUnique({
         where: { id: orderId },
         select: ORDER_WITH_HISTORY_SELECT,
@@ -299,34 +279,42 @@ export const orderService = {
       return refreshed;
     });
 
-    // PERF: Invalidate both per-order and kitchen queue caches
     await Promise.all([
       cacheDel(CACHE_KEYS.order(orderId)),
       cacheDel(CACHE_KEYS.kitchenOrders(restaurantId)),
     ]);
 
-    // PERF: Order-tracking room receives a minimal status-change event (not
-    // the full order) — reduces per-event payload size by ~80 %.
-    emitToOrder(orderId, SOCKET_EVENTS.ORDER_STATUS_CHANGED, {
+    // Broadcaster: emit full 'updated' order object to all listeners
+    
+    // 1. Specific Order tracking room
+    emitToOrder(orderId, SOCKET_EVENTS.ORDER_UPDATED, updated); // clean 'order_updated'
+    emitToOrder(orderId, SOCKET_EVENTS.ORDER_UPDATED_LEGACY, updated); // legacy 'order:updated'
+    emitToOrder(orderId, SOCKET_EVENTS.ORDER_STATUS_CHANGED, { // legacy status changed payload
       orderId,
       status: input.status,
       timestamp: new Date(),
     });
 
-    // PERF: Kitchen and admin get a lean update payload (no full statusHistory)
-    const kitchenUpdatePayload = {
-      id: updated.id,
-      orderNumber: updated.orderNumber,
-      restaurantId: updated.restaurantId,
-      status: updated.status,
-      tableNumber: updated.tableNumber,
-      orderType: updated.orderType,
-      estimatedMins: updated.estimatedMins,
-      updatedAt: updated.updatedAt,
-      items: updated.items,
-    };
-    emitToKitchen(restaurantId, SOCKET_EVENTS.ORDER_UPDATED, kitchenUpdatePayload);
-    emitToAdmin(restaurantId, SOCKET_EVENTS.ORDER_UPDATED, kitchenUpdatePayload);
+    // 2. Kitchen / Restaurant / Admin rooms
+    emitToKitchen(restaurantId, SOCKET_EVENTS.ORDER_UPDATED, updated); // clean 'order_updated'
+    emitToKitchen(restaurantId, SOCKET_EVENTS.ORDER_UPDATED_LEGACY, updated); // legacy 'order:updated'
+    emitToAdmin(restaurantId, SOCKET_EVENTS.ORDER_UPDATED, updated);
+    emitToRestaurant(restaurantId, SOCKET_EVENTS.ORDER_UPDATED, updated);
+
+    // 3. Status-specific events
+    if (input.status === OrderStatus.COMPLETED) {
+      emitToKitchen(restaurantId, SOCKET_EVENTS.ORDER_COMPLETED, updated);
+      emitToAdmin(restaurantId, SOCKET_EVENTS.ORDER_COMPLETED, updated);
+      emitToRestaurant(restaurantId, SOCKET_EVENTS.ORDER_COMPLETED, updated);
+      emitToOrder(orderId, SOCKET_EVENTS.ORDER_COMPLETED, updated);
+    }
+    
+    if (input.status === OrderStatus.CANCELLED) {
+      emitToKitchen(restaurantId, SOCKET_EVENTS.ORDER_CANCELLED, updated);
+      emitToAdmin(restaurantId, SOCKET_EVENTS.ORDER_CANCELLED, updated);
+      emitToRestaurant(restaurantId, SOCKET_EVENTS.ORDER_CANCELLED, updated);
+      emitToOrder(orderId, SOCKET_EVENTS.ORDER_CANCELLED, updated);
+    }
 
     if (input.status === OrderStatus.READY) {
       emitToOrder(orderId, SOCKET_EVENTS.KITCHEN_ORDER_READY, { orderId });
@@ -335,13 +323,15 @@ export const orderService = {
     return updated;
   },
 
-  /**
-   * Kitchen undo: reverse the order one status step backward.
-   */
   async undoOrderStatus(orderId: string, restaurantId: string, note?: string) {
     const updated = await prisma.$transaction(async (tx) => {
-      const order = await tx.order.findFirst({ where: { id: orderId, restaurantId } });
-      if (!order) throw ApiError.notFound('Order not found');
+      const order = await tx.order.findUnique({
+        where: { id: orderId },
+        select: { id: true, status: true, restaurantId: true },
+      });
+      if (!order || order.restaurantId !== restaurantId) {
+        throw ApiError.notFound('Order not found');
+      }
 
       let prevStatus: OrderStatus;
       try {
@@ -350,9 +340,14 @@ export const orderService = {
         throw ApiError.badRequest((err as Error).message, 'ORDER_STATUS_UNDO_NOT_ALLOWED');
       }
 
+      // Clear the timestamp when rolling back
+      const clearTimestamps: Record<string, null> = {};
+      if (order.status === OrderStatus.PREPARING) clearTimestamps.startedPreparingAt = null;
+      if (order.status === OrderStatus.READY)     clearTimestamps.readyAt = null;
+
       const updateResult = await tx.order.updateMany({
         where: { id: orderId, status: order.status },
-        data: { status: prevStatus },
+        data: { status: prevStatus, ...clearTimestamps },
       });
 
       if (updateResult.count !== 1) {
@@ -370,7 +365,6 @@ export const orderService = {
         },
       });
 
-      // PERF: Use select (not include) to fetch only what clients render
       const refreshed = await tx.order.findUnique({
         where: { id: orderId },
         select: ORDER_WITH_HISTORY_SELECT,
@@ -379,25 +373,17 @@ export const orderService = {
       return refreshed;
     });
 
-    // PERF: Invalidate both caches in parallel
     await Promise.all([
       cacheDel(CACHE_KEYS.order(orderId)),
       cacheDel(CACHE_KEYS.kitchenOrders(restaurantId)),
     ]);
 
-    const kitchenUpdatePayload = {
-      id: updated.id,
-      orderNumber: updated.orderNumber,
-      restaurantId: updated.restaurantId,
-      status: updated.status,
-      tableNumber: updated.tableNumber,
-      orderType: updated.orderType,
-      estimatedMins: updated.estimatedMins,
-      updatedAt: updated.updatedAt,
-      items: updated.items,
-    };
-    emitToKitchen(restaurantId, SOCKET_EVENTS.ORDER_UPDATED, kitchenUpdatePayload);
-    emitToAdmin(restaurantId, SOCKET_EVENTS.ORDER_UPDATED, kitchenUpdatePayload);
+    // Broadcaster: Broadcast full reverted order to sync all devices instantly
+    emitToKitchen(restaurantId, SOCKET_EVENTS.ORDER_UPDATED, updated); // clean 'order_updated'
+    emitToKitchen(restaurantId, SOCKET_EVENTS.ORDER_UPDATED_LEGACY, updated); // legacy 'order:updated'
+    emitToAdmin(restaurantId, SOCKET_EVENTS.ORDER_UPDATED, updated);
+    emitToRestaurant(restaurantId, SOCKET_EVENTS.ORDER_UPDATED, updated);
+    emitToOrder(orderId, SOCKET_EVENTS.ORDER_UPDATED, updated);
 
     return updated;
   },
@@ -405,22 +391,17 @@ export const orderService = {
   // ── Kitchen queue ─────────────────────────────────────────────────────────
 
   async getKitchenOrders(restaurantId: string) {
-    // PERF: Short-lived cache (10 s) absorbs the rapid polling pattern common
-    // in kitchen displays without serving stale data.  The cache is explicitly
-    // invalidated on every order create/update, so worst-case staleness is 10 s
-    // only when a write is missed (e.g. Redis down fallback).
     const cacheKey = CACHE_KEYS.kitchenOrders(restaurantId);
     const cached = await cacheGet(cacheKey);
     if (cached) return cached;
 
+    // Only show active states on the kanban board
     const activeStatuses = [
-      OrderStatus.PENDING,
-      OrderStatus.CONFIRMED,
+      OrderStatus.NEW,
       OrderStatus.PREPARING,
       OrderStatus.READY,
     ];
 
-    // PERF: Use select (not include) to fetch only kitchen-relevant fields
     const orders = await prisma.order.findMany({
       where: { restaurantId, status: { in: activeStatuses } },
       select: KITCHEN_ORDER_SELECT,
@@ -450,7 +431,6 @@ export const orderService = {
       where.createdAt = createdAt;
     }
 
-    // PERF: count and findMany run in parallel (was already correct)
     const [orders, total] = await Promise.all([
       prisma.order.findMany({
         where,

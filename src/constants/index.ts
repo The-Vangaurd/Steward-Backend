@@ -66,11 +66,18 @@ export { ORDER_STATUS_TRANSITIONS };
 // ─── Socket Events ────────────────────────────────────────────────────────────
 
 export const SOCKET_EVENTS = {
-  // Order lifecycle
-  ORDER_CREATED: 'order:created',
-  ORDER_UPDATED: 'order:updated',
+  // Clean New Order lifecycle (websocket sync)
+  ORDER_CREATED: 'order_created',
+  ORDER_UPDATED: 'order_updated',
+  ORDER_COMPLETED: 'order_completed',
+  ORDER_CANCELLED: 'order_cancelled',
+  RECONNECT_SYNC: 'reconnect_sync',
+
+  // Legacy Order lifecycle (preserved for backward compatibility with frontend hooks)
+  ORDER_CREATED_LEGACY: 'order:created',
+  ORDER_UPDATED_LEGACY: 'order:updated',
   ORDER_STATUS_CHANGED: 'order:status_changed',
-  ORDER_CANCELLED: 'order:cancelled',
+  ORDER_CANCELLED_LEGACY: 'order:cancelled',
 
   // Kitchen
   KITCHEN_NEW_ORDER: 'kitchen:new_order',

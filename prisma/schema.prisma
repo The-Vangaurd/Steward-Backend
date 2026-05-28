@@ -18,12 +18,11 @@ enum UserRole {
 }
 
 enum OrderStatus {
-  PENDING
-  CONFIRMED
   PREPARING
   READY
-  DELIVERED
   CANCELLED
+  NEW
+  COMPLETED
 }
 
 enum OrderType {
@@ -208,7 +207,7 @@ model Order {
   id              String      @id @default(cuid())
   orderNumber     String      @unique @db.VarChar(30)
   restaurantId    String
-  status          OrderStatus @default(PENDING)
+  status          OrderStatus @default(NEW)
   orderType       OrderType   @default(DINE_IN)
   tableNumber     String?     @db.VarChar(20)
   customerName    String?     @db.VarChar(100)
@@ -220,12 +219,11 @@ model Order {
   taxAmount       Decimal     @default(0) @db.Decimal(10, 2)
   totalAmount     Decimal     @db.Decimal(10, 2)
   estimatedMins   Int         @default(20)
-  confirmedAt     DateTime?
-  preparedAt      DateTime?
-  readyAt         DateTime?
-  deliveredAt     DateTime?
-  cancelledAt     DateTime?
-  createdAt       DateTime    @default(now())
+  readyAt            DateTime?
+  cancelledAt        DateTime?
+  startedPreparingAt DateTime?
+  completedAt        DateTime?
+  createdAt          DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
 
   restaurant    Restaurant           @relation(fields: [restaurantId], references: [id], onDelete: Restrict)

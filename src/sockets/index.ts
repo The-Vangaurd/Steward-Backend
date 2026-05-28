@@ -7,6 +7,7 @@ import { verifyAccessTokenSafe } from '../utils/jwt';
 import { SOCKET_EVENTS, SOCKET_ROOMS } from '../constants';
 import { logger } from '../utils/logger';
 import { prisma } from '../config/database';
+import { OrderStatus } from '@prisma/client';
 
 let io: Server;
 
@@ -250,6 +251,108 @@ export const initSocket = (httpServer: HttpServer): Server => {
 
     socket.on(SOCKET_EVENTS.LEAVE_ROOM, (room: string) => {
       socket.leave(room);
+    });
+
+    // ── Reconnection Truth Synchronization ────────────────────────────────────
+    socket.on(SOCKET_EVENTS.RECONNECT_SYNC, async (
+      data: { lastSyncTime?: string },
+      cb?: (res: {
+        success: boolean;
+        activeOrders?: any[];
+        updatedOrders?: any[];
+        serverTime?: string;
+        error?: string;
+      }) => void,
+    ) => {
+      try {
+        if (!socket.data.isAuthenticated) {
+          throw new Error('UNAUTHORIZED');
+        }
+        const restaurantId = socket.data.user?.restaurantId;
+        if (!restaurantId) {
+          throw new Error('NO_RESTAURANT_ASSIGNED');
+        }
+
+        // 1. Fetch all current active orders (NEW, PREPARING, READY)
+        // Using optimal fields including startedPreparingAt
+        const activeOrders = await prisma.order.findMany({
+          where: {
+            restaurantId,
+            status: { in: [OrderStatus.NEW, OrderStatus.PREPARING, OrderStatus.READY] },
+          },
+          select: {
+            id: true,
+            orderNumber: true,
+            status: true,
+            orderType: true,
+            tableNumber: true,
+            notes: true,
+            estimatedMins: true,
+            createdAt: true,
+            startedPreparingAt: true,
+            updatedAt: true,
+            items: {
+              select: {
+                id: true,
+                name: true,
+                quantity: true,
+                notes: true,
+                menuItem: { select: { kitchenType: true } },
+              },
+            },
+          },
+          orderBy: { createdAt: 'asc' },
+        });
+
+        // 2. Fetch recently updated orders since lastSyncTime (if provided)
+        let updatedOrders: any[] = [];
+        if (data.lastSyncTime) {
+          const syncDate = new Date(data.lastSyncTime);
+          if (!isNaN(syncDate.getTime())) {
+            updatedOrders = await prisma.order.findMany({
+              where: {
+                restaurantId,
+                updatedAt: { gte: syncDate },
+              },
+              select: {
+                id: true,
+                orderNumber: true,
+                status: true,
+                orderType: true,
+                tableNumber: true,
+                notes: true,
+                estimatedMins: true,
+                createdAt: true,
+                startedPreparingAt: true,
+                updatedAt: true,
+                items: {
+                  select: {
+                    id: true,
+                    name: true,
+                    quantity: true,
+                    notes: true,
+                    menuItem: { select: { kitchenType: true } },
+                  },
+                },
+              },
+              orderBy: { updatedAt: 'asc' },
+            });
+          }
+        }
+
+        cb?.({
+          success: true,
+          activeOrders,
+          updatedOrders,
+          serverTime: new Date().toISOString(),
+        });
+      } catch (err: any) {
+        logger.error('WS reconnect_sync failed', {
+          socketId: socket.id,
+          error: err.message,
+        });
+        cb?.({ success: false, error: err.message });
+      }
     });
 
     socket.on(SOCKET_EVENTS.DISCONNECT, (reason: string) => {
