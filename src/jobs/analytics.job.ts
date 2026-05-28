@@ -52,13 +52,34 @@ const connection = parseRedisUrl(env.REDIS_URL);
 // Creating them inside async functions leaks Redis connections on every call
 // because each Queue/Worker opens its own ioredis socket.
 
-export const analyticsQueue = connection
-  ? new Queue('analytics', { connection })
-  : null;
+// FIX: Wrapped Queue constructors in try/catch. If parseRedisUrl returns a
+// value but the URL is malformed in a way that passes URL parsing but fails
+// the Queue constructor (e.g. invalid auth chars), the previous code would
+// throw at module evaluation time — before start() is called — crashing the
+// process with no useful error message.
+export const analyticsQueue = (() => {
+  if (!connection) return null;
+  try {
+    return new Queue('analytics', { connection });
+  } catch (err) {
+    logger.error('Failed to create analytics queue — BullMQ jobs disabled', {
+      error: (err as Error).message,
+    });
+    return null;
+  }
+})();
 
-const sessionCleanupQueue = connection
-  ? new Queue('session-cleanup', { connection })
-  : null;
+const sessionCleanupQueue = (() => {
+  if (!connection) return null;
+  try {
+    return new Queue('session-cleanup', { connection });
+  } catch (err) {
+    logger.error('Failed to create session-cleanup queue — session cleanup disabled', {
+      error: (err as Error).message,
+    });
+    return null;
+  }
+})();
 
 // Session cleanup worker is a singleton — not created inside startSessionCleanupCron
 // so that calling that function more than once doesn't spin up duplicate workers.
