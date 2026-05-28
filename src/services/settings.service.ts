@@ -230,7 +230,7 @@ export const settingsService = {
     description?: string | null;
     phone?: string | null;
     email?: string | null;
-    address?: unknown;
+    address?: InputJsonValue;
     timezone?: string;
     currency?: string;
     logoUrl?: string | null;
