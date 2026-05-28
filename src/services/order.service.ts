@@ -444,10 +444,10 @@ export const orderService = {
     }
     if (query.orderType) where.orderType = query.orderType;
     if (query.from || query.to) {
-      where.createdAt = {
-        ...(query.from && { gte: new Date(query.from) }),
-        ...(query.to   && { lte: new Date(query.to) }),
-      };
+      const createdAt: { gte?: Date; lte?: Date } = {};
+      if (query.from) createdAt.gte = new Date(query.from as string);
+      if (query.to)   createdAt.lte = new Date(query.to as string);
+      where.createdAt = createdAt;
     }
 
     // PERF: count and findMany run in parallel (was already correct)

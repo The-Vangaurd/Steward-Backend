@@ -8,4 +8,7 @@ cloudinary.config({
   secure: true,
 });
 
+// Re-export cloudinaryConfigured from env so that any file importing from
+// this module also gets the flag (avoids import-path mistakes).
+export { cloudinaryConfigured } from './env';
 export { cloudinary };

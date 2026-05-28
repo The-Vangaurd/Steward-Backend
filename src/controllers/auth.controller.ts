@@ -13,6 +13,7 @@ const getCookieOptions = () => {
     httpOnly: true,
     secure: isProd,
     sameSite: (isProd ? 'none' : 'lax') as 'none' | 'lax',
+    partitioned: isProd, // CHIPS: required for cross-site cookies in modern browsers
     maxAge: 7 * 24 * 60 * 60 * 1000,
     path: '/v1/auth/refresh',
   };
@@ -25,6 +26,7 @@ const getStaffCookieOptions = () => {
     httpOnly: true,
     secure: isProd,
     sameSite: (isProd ? 'none' : 'lax') as 'none' | 'lax',
+    partitioned: isProd, // CHIPS: required for cross-site cookies in modern browsers
     maxAge: 12 * 60 * 60 * 1000, // 12 hours — one shift
     path: '/v1/auth/refresh',
   };
@@ -36,6 +38,7 @@ const getClearCookieOptions = () => {
     httpOnly: true,
     secure: isProd,
     sameSite: (isProd ? 'none' : 'lax') as 'none' | 'lax',
+    partitioned: isProd, // CHIPS: required for cross-site cookies in modern browsers
     path: '/v1/auth/refresh',
   };
 };

@@ -3,7 +3,7 @@ import { cacheGet, cacheSet, cacheDel } from '../utils/redis';
 import { CACHE_KEYS, CACHE_TTL } from '../constants';
 import { ApiError } from '../utils/ApiError';
 import { logger } from '../utils/logger';
-import { Prisma } from '@prisma/client';
+import { Decimal, InputJsonValue, JsonValue } from '@prisma/client/runtime/library';
 import { cloudinary, cloudinaryConfigured } from '../config/cloudinary';
 import { sanitizeCSS } from '../utils/cssUtils';
 
@@ -18,7 +18,7 @@ export interface SettingsPatch {
   fontHeading?: string | null;
   fontBody?: string | null;
   customCss?: string | null;
-  openingHours?: Prisma.InputJsonValue;
+  openingHours?: InputJsonValue;
   offlineMode?: boolean;
   autoAcceptOrders?: boolean;
   estimatedPrepMins?: number;
@@ -70,7 +70,7 @@ function buildCombinedSettings(
     description: string | null;
     phone: string | null;
     email: string | null;
-    address: Prisma.JsonValue;
+    address: JsonValue;
     timezone: string;
     currency: string;
     slug: string;
@@ -78,15 +78,15 @@ function buildCombinedSettings(
     bannerUrl: string | null;
   },
   settings: {
-    taxRate: Prisma.Decimal;
-    serviceCharge: Prisma.Decimal;
+    taxRate: Decimal;
+    serviceCharge: Decimal;
     primaryColor: string | null;
     secondaryColor: string | null;
     accentColor: string | null;
     fontHeading: string | null;
     fontBody: string | null;
     customCss: string | null;
-    openingHours: Prisma.JsonValue;
+    openingHours: JsonValue;
     offlineMode: boolean;
     autoAcceptOrders: boolean;
     estimatedPrepMins: number;
