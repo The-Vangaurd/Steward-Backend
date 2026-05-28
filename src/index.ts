@@ -32,12 +32,9 @@ app.set('trust proxy', 1); // Trust reverse proxy headers (Render TLS terminatio
 const httpServer = http.createServer(app);
 
 // ── Security & parsing ────────────────────────────────────────────────────────
-// PERF: Optimised helmet config — disable unused headers that add CPU overhead.
 app.use(
   helmet({
-    // crossOriginEmbedderPolicy adds a header irrelevant for an API-only server
     crossOriginEmbedderPolicy: false,
-    // contentSecurityPolicy is browser-facing; skip for a pure JSON API
     contentSecurityPolicy: false,
   }),
 );
@@ -46,44 +43,42 @@ app.use(
   cors({
     origin: (origin, callback) => {
       if (!origin) return callback(null, true);
+
+      // ── Explicit allowlist from CORS_ORIGINS env var ─────────────────────
       const allowedOrigins = env.CORS_ORIGINS
         ? env.CORS_ORIGINS.split(',').map((o) => o.replace(/['"]/g, '').trim())
         : [];
       if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
-      
-      // Dynamic Vercel branch preview deployment support
-      const isOwnVercelPreview = /^https:\/\/steward-(admin|menu)-[a-z0-9-]+\.vercel\.app$/.test(origin);
-      if (isOwnVercelPreview) {
+
+      // ── Dynamic Vercel deployment support ────────────────────────────────
+      // Matches all of:
+      //   steward-menu.vercel.app            ← bare production deployment
+      //   steward-admin-8nma.vercel.app      ← named production deployment
+      //   steward-menu-abc123.vercel.app     ← branch preview deployments
+      //   steward-admin-abc123.vercel.app    ← branch preview deployments
+      const isOwnVercelDeploy =
+        /^https:\/\/steward-(admin|menu)(-[a-z0-9-]+)?\.vercel\.app$/.test(origin);
+      if (isOwnVercelDeploy) {
         return callback(null, true);
       }
-      
-      // Clean browser-level rejection without throwing server logs exceptions
+
+      // Reject everything else cleanly (no thrown errors in server logs)
       callback(null, false);
     },
     credentials: true,
-    // PERF: Cache preflight for 24 hours to avoid OPTIONS round-trips on every
-    // cross-origin request from the admin dashboard.
+    // Cache preflight for 24 hours to avoid OPTIONS round-trips
     maxAge: 86_400,
   }),
 );
 
-// PERF: compression() reduces JSON response size by ~60-70 % for larger payloads.
-// Already enabled — keep it as the first transform before routes.
 app.use(compression());
-
-// PERF: Reduce JSON body limit from 10 MB to 2 MB.  The largest legitimate
-// payload in this API is an order (items + notes) which is well under 100 KB.
-// A 10 MB limit opens the server to memory exhaustion via large request bodies.
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 app.use(cookieParser());
 
 // ── Request timeout ───────────────────────────────────────────────────────────
-// PERF: Kill requests that take longer than 30 s.  Without a timeout, slow DB
-// queries or Cloudinary uploads hold open an Express connection indefinitely,
-// consuming a thread slot and a Prisma connection from the pool.
 const REQUEST_TIMEOUT_MS = 30_000;
 app.use((_req: Request, res: Response, next: NextFunction) => {
   res.setTimeout(REQUEST_TIMEOUT_MS, () => {
@@ -98,15 +93,10 @@ app.use((_req: Request, res: Response, next: NextFunction) => {
 });
 
 // ── Logging ───────────────────────────────────────────────────────────────────
-// PERF: Use 'short' format in production (one line, no user-agent, no referrer)
-// instead of 'combined' (which logs every header).  Reduces I/O and log volume
-// by ~50 % for the same request throughput.
 const morganFormat = env.NODE_ENV === 'production' ? 'short' : 'dev';
 app.use(
   morgan(morganFormat, {
     stream: { write: (msg) => logger.http(msg.trim()) },
-    // Skip health checks — these fire every few seconds from load balancers
-    // and contribute nothing useful to logs.
     skip: (req) => req.path === '/health',
   }),
 );
@@ -115,14 +105,14 @@ app.use(
 app.use(globalRateLimiter);
 
 // ── Routes ────────────────────────────────────────────────────────────────────
-app.use('/health',                   healthRouter);
-app.use('/v1/auth',                  authRouter);
-app.use('/v1/menu',                  menuRouter);
-app.use('/v1/menu',                  themeRouter);   // GET /v1/menu/:slug/theme (public)
-app.use('/v1/orders',                orderRouter);
-app.use('/v1/admin/analytics',       analyticsRouter);
-app.use('/v1/admin/staff',           staffRouter);
-app.use('/v1/settings',              settingsRouter); // GET/PATCH /v1/settings
+app.use('/health',             healthRouter);
+app.use('/v1/auth',            authRouter);
+app.use('/v1/menu',            menuRouter);
+app.use('/v1/menu',            themeRouter);   // GET /v1/menu/:slug/theme (public)
+app.use('/v1/orders',          orderRouter);
+app.use('/v1/admin/analytics', analyticsRouter);
+app.use('/v1/admin/staff',     staffRouter);
+app.use('/v1/settings',        settingsRouter);
 
 // ── 404 & error handlers ──────────────────────────────────────────────────────
 app.use(notFoundHandler);
@@ -133,11 +123,9 @@ const start = async (): Promise<void> => {
   try {
     logger.info('Starting Steward Backend', { env: env.NODE_ENV, port: env.PORT });
 
-    // 1. Database — fatal if unreachable
     await connectDatabase();
     logger.info('Database connected ✓');
 
-    // 2. HTTP server — start before optional services so health checks work immediately
     await new Promise<void>((resolve) => {
       httpServer.listen(env.PORT, '0.0.0.0', () => {
         logger.info(`HTTP server listening on :${env.PORT} [${env.NODE_ENV}]`);
@@ -145,7 +133,6 @@ const start = async (): Promise<void> => {
       });
     });
 
-    // 3. Redis — non-fatal fallback (caching and sockets degrade gracefully)
     try {
       await connectRedis();
       logger.info('Redis connected ✓');
@@ -155,11 +142,9 @@ const start = async (): Promise<void> => {
       });
     }
 
-    // 4. Sockets
     initSocket(httpServer);
     logger.info('Socket.IO initialised ✓');
 
-    // 5. Background jobs — non-fatal
     if (env.NODE_ENV !== 'test') {
       try {
         startAnalyticsWorker();
