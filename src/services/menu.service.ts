@@ -66,6 +66,7 @@ export const menuService = {
             price: true,
             imageUrl: true,
             kitchenType: true,
+            isAvailable: true,
             isPopular: true,
             isVeg: true,
             calories: true,
