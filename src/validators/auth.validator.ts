@@ -22,6 +22,7 @@ export const refreshTokenSchema = z.object({
 });
 
 // ─── Owner Registration ───────────────────────────────────────────────────────
+// password is optional when oauthToken is present (Google OAuth registration)
 
 export const ownerRegisterSchema = z.object({
   restaurantName: z.string().min(2, 'Restaurant name must be at least 2 characters').max(255),
@@ -31,8 +32,11 @@ export const ownerRegisterSchema = z.object({
     .string()
     .min(8, 'Password must be at least 8 characters')
     .regex(/[A-Z]/, 'Must contain at least one uppercase letter')
-    .regex(/[0-9]/, 'Must contain at least one number'),
-  phone: z.string().min(7, 'Phone number is required').max(20),
+    .regex(/[0-9]/, 'Must contain at least one number')
+    .optional(),
+  phone: z.string().min(0).max(20).optional().default(''),
+  /** Passed by the Google OAuth restaurant-setup page — skips password requirement. */
+  oauthToken: z.string().optional(),
 });
 
 // ─── Staff PIN Login ──────────────────────────────────────────────────────────

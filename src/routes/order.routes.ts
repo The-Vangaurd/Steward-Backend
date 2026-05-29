@@ -32,7 +32,6 @@ router.get('/admin/list', ...adminGuard, validate(orderQuerySchema, 'query'), or
 
 // ── Public ────────────────────────────────────────────────────────────────────
 router.get('/guest/orders', orderController.getGuestOrders);
-router.get('/recall', orderController.recallGuestOrders);
 router.post('/:id/cancel', orderController.cancelGuestOrder);
 router.get('/:id/track', orderController.trackOrder);
 router.get('/:id', orderController.getOrderById);

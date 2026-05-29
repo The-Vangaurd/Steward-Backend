@@ -113,16 +113,92 @@ export const authService = {
   },
 
   async registerOwner(input: OwnerRegisterInput) {
-    const existing = await prisma.user.findUnique({ where: { email: input.email } });
-    if (existing) throw ApiError.conflict('Email already registered', 'EMAIL_ALREADY_EXISTS');
-
     const slug = await generateUniqueSlug(input.restaurantName);
     const restaurantCode = await generateUniqueRestaurantCode();
-    const passwordHash = await bcrypt.hash(input.password, SALT_ROUNDS);
 
     const nameParts = input.ownerName.trim().split(/\s+/);
     const firstName = nameParts[0];
     const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+
+    // ── OAuth registration path ────────────────────────────────────────────
+    // When oauthToken is present, the user was created by the Google OAuth flow
+    // (intent=register). They exist in DB but have no restaurant yet.
+    const existingUser = await prisma.user.findUnique({ where: { email: input.email } });
+
+    if (input.oauthToken) {
+      // Verify the OAuth user actually exists and has no restaurant
+      if (!existingUser) {
+        throw ApiError.badRequest(
+          'OAuth account not found — please sign in with Google again',
+          'OAUTH_USER_NOT_FOUND',
+        );
+      }
+      if (existingUser.restaurantId) {
+        throw ApiError.conflict(
+          'Restaurant already set up for this account',
+          'RESTAURANT_ALREADY_EXISTS',
+        );
+      }
+
+      const result = await prisma.$transaction(async (tx) => {
+        const restaurant = await tx.restaurant.create({
+          data: {
+            name: input.restaurantName,
+            slug,
+            restaurantCode,
+            phone: input.phone ?? '',
+            email: input.email,
+            settings: { create: {} },
+          },
+        });
+
+        const user = await tx.user.update({
+          where: { id: existingUser.id },
+          data: {
+            firstName,
+            lastName,
+            restaurantId: restaurant.id,
+          },
+          select: {
+            id: true, email: true, firstName: true, lastName: true,
+            role: true, restaurantId: true, createdAt: true,
+          },
+        });
+
+        return { user, restaurant };
+      });
+
+      const accessToken = signAccessToken({
+        id: result.user.id,
+        email: result.user.email,
+        role: result.user.role,
+        restaurantId: result.restaurant.id,
+      });
+      const refreshToken = signRefreshToken(result.user.id);
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      await prisma.session.create({ data: { userId: result.user.id, refreshToken, expiresAt } });
+
+      return {
+        accessToken,
+        refreshToken,
+        user: result.user,
+        restaurant: {
+          id: result.restaurant.id,
+          name: result.restaurant.name,
+          slug: result.restaurant.slug,
+          restaurantCode: result.restaurant.restaurantCode,
+        },
+      };
+    }
+
+    // ── Email/password registration path ───────────────────────────────────
+    if (existingUser) throw ApiError.conflict('Email already registered', 'EMAIL_ALREADY_EXISTS');
+
+    if (!input.password) {
+      throw ApiError.badRequest('Password is required for email registration', 'PASSWORD_REQUIRED');
+    }
+
+    const passwordHash = await bcrypt.hash(input.password, SALT_ROUNDS);
 
     const result = await prisma.$transaction(async (tx) => {
       const restaurant = await tx.restaurant.create({
@@ -130,7 +206,7 @@ export const authService = {
           name: input.restaurantName,
           slug,
           restaurantCode,
-          phone: input.phone,
+          phone: input.phone ?? '',
           email: input.email,
           settings: { create: {} },
         },
@@ -142,7 +218,7 @@ export const authService = {
           passwordHash,
           firstName,
           lastName,
-          phone: input.phone,
+          phone: input.phone ?? '',
           role: UserRole.ADMIN,
           restaurantId: restaurant.id,
         },
