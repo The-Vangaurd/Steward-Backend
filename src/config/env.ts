@@ -53,6 +53,13 @@ const envSchema = z.object({
 
   JWT_REFRESH_EXPIRES_IN: z.string().default('7d'),
 
+  // ── Guest order recall JWT ────────────────────────────────────────────────
+  // Separate secret so guest tokens are independent of staff auth tokens.
+  JWT_GUEST_SECRET: z
+    .string()
+    .min(32, { message: 'JWT_GUEST_SECRET must be at least 32 characters' })
+    .optional(),
+
   // ── CORS ──────────────────────────────────────────────────────────────────
   CORS_ORIGINS: z
     .string()

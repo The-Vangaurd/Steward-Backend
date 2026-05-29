@@ -57,3 +57,31 @@ export const verifyRefreshToken = (token: string): { sub: string } => {
     throw ApiError.unauthorized('Invalid refresh token', 'TOKEN_INVALID');
   }
 };
+
+// ── Guest order recall tokens ─────────────────────────────────────────────────
+
+export interface GuestTokenPayload {
+  orderId: string;
+  guestId: string;
+  restaurantSlug: string;
+}
+
+const guestSecret = (): string => {
+  // Fall back to JWT_SECRET if JWT_GUEST_SECRET is not configured.
+  return env.JWT_GUEST_SECRET ?? env.JWT_SECRET;
+};
+
+export const signGuestToken = (payload: GuestTokenPayload): string => {
+  return jwt.sign(payload, guestSecret(), { expiresIn: '30d' } as jwt.SignOptions);
+};
+
+export const verifyGuestToken = (token: string): GuestTokenPayload => {
+  try {
+    return jwt.verify(token, guestSecret()) as GuestTokenPayload;
+  } catch (err) {
+    if (err instanceof jwt.TokenExpiredError) {
+      throw ApiError.unauthorized('Guest recall token has expired', 'GUEST_TOKEN_EXPIRED');
+    }
+    throw ApiError.unauthorized('Invalid guest recall token', 'GUEST_TOKEN_INVALID');
+  }
+};

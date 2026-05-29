@@ -5,14 +5,15 @@ import { sendSuccess } from '../utils/response';
 import { HTTP_STATUS } from '../constants';
 import { AuthenticatedRequest } from '../types';
 import { ApiError } from '../utils/ApiError';
+import { verifyGuestToken } from '../utils/jwt';
 
 export const orderController = {
   // ── Customer ───────────────────────────────────────────────────────────────
 
   createOrder: asyncHandler(async (req: Request, res: Response) => {
     const { restaurantId } = req.params;
-    const order = await orderService.createOrder(restaurantId, req.body);
-    sendSuccess(res, HTTP_STATUS.CREATED, order);
+    const { order, recallToken } = await orderService.createOrder(restaurantId, req.body);
+    sendSuccess(res, HTTP_STATUS.CREATED, { ...order, recallToken });
   }),
 
   getOrderById: asyncHandler(async (req: Request, res: Response) => {
@@ -68,6 +69,22 @@ export const orderController = {
     }
 
     const orders = await orderService.getGuestOrders(guestId as string, restaurantSlug as string);
+    sendSuccess(res, HTTP_STATUS.OK, orders);
+  }),
+
+  /**
+   * GET /orders/recall?token=…
+   * No auth required — verifies the guest JWT and returns all orders for that
+   * guest at that restaurant. Fallback for users who cleared their cookies.
+   */
+  recallGuestOrders: asyncHandler(async (req: Request, res: Response) => {
+    const { token } = req.query;
+    if (!token || typeof token !== 'string') {
+      throw ApiError.badRequest('Missing required query parameter: token');
+    }
+
+    const { guestId, restaurantSlug } = verifyGuestToken(token);
+    const orders = await orderService.recallGuestOrders(guestId, restaurantSlug);
     sendSuccess(res, HTTP_STATUS.OK, orders);
   }),
 

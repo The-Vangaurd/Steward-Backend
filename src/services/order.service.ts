@@ -12,6 +12,7 @@ import {
   isValidOrderStatusTransition,
   validateUndoTransition,
 } from '../utils/stateMachine';
+import { signGuestToken } from '../utils/jwt';
 
 // ── Minimal select shapes ─────────────────────────────────────────────────────
 
@@ -175,7 +176,13 @@ export const orderService = {
     emitToKitchen(restaurantId, SOCKET_EVENTS.KITCHEN_NEW_ORDER, order); // legacy 'kitchen:new_order'
     emitToRestaurant(restaurantId, SOCKET_EVENTS.ORDER_CREATED_LEGACY, order); // legacy 'order:created'
 
-    return order;
+    // Sign a 30-day guest recall token so the device can retrieve orders
+    // even after cookies are cleared.
+    const recallToken = input.guestId
+      ? signGuestToken({ orderId: order.id, guestId: input.guestId, restaurantSlug: slugOrId })
+      : null;
+
+    return { order, recallToken };
   },
 
   async getOrderById(id: string) {
@@ -459,6 +466,10 @@ export const orderService = {
     ]);
 
     return { orders, meta: buildPaginationMeta(total, pagination.page, pagination.limit) };
+  },
+
+  async recallGuestOrders(guestId: string, restaurantSlug: string) {
+    return this.getGuestOrders(guestId, restaurantSlug);
   },
 
   async getGuestOrders(guestId: string, restaurantSlug: string) {
