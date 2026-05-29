@@ -11,11 +11,12 @@ export const auditController = {
     const restaurantId = (req as AuthenticatedRequest).user.restaurantId;
     if (!restaurantId) throw ApiError.forbidden('No restaurant associated with account');
 
-    const { action, resourceType, from, to, page, limit } = req.query;
+    const { action, resourceType, actorId, from, to, page, limit } = req.query;
 
     const { logs, meta } = await auditService.listAuditLogs(restaurantId, {
       action: action as string,
       resourceType: resourceType as string,
+      actorId: actorId as string,
       from: from as string,
       to: to as string,
       page,

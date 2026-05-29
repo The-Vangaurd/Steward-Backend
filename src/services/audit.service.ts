@@ -8,6 +8,7 @@ export const auditService = {
     filters: {
       action?: string;
       resourceType?: string;
+      actorId?: string;
       from?: string;
       to?: string;
       page?: unknown;
@@ -22,6 +23,9 @@ export const auditService = {
     }
     if (filters.resourceType) {
       where.resourceType = filters.resourceType;
+    }
+    if (filters.actorId) {
+      where.actorId = filters.actorId;
     }
     if (filters.from || filters.to) {
       where.createdAt = {};
