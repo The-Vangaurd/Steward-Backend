@@ -16,6 +16,7 @@ export const createOrderSchema = z.object({
   customerPhone: z.string().max(20).optional(),
   customerEmail: z.string().email().optional(),
   items: z.array(orderItemSchema).min(1, 'Order must have at least one item'),
+  guestId: z.string().max(100).optional(),
 });
 
 export const updateOrderStatusSchema = z.object({

@@ -60,4 +60,24 @@ export const orderController = {
     const { orders, meta } = await orderService.getAdminOrders(restaurantId, req.query as any);
     sendSuccess(res, HTTP_STATUS.OK, orders, meta);
   }),
+
+  getGuestOrders: asyncHandler(async (req: Request, res: Response) => {
+    const { guestId, restaurantSlug } = req.query;
+    if (!guestId || !restaurantSlug) {
+      throw ApiError.badRequest('Missing required query parameters: guestId and restaurantSlug');
+    }
+
+    const orders = await orderService.getGuestOrders(guestId as string, restaurantSlug as string);
+    sendSuccess(res, HTTP_STATUS.OK, orders);
+  }),
+
+  cancelGuestOrder: asyncHandler(async (req: Request, res: Response) => {
+    const { guestId } = req.body;
+    if (!guestId) {
+      throw ApiError.badRequest('Missing required body parameter: guestId');
+    }
+
+    const updated = await orderService.cancelGuestOrder(req.params.id, guestId);
+    sendSuccess(res, HTTP_STATUS.OK, updated);
+  }),
 };

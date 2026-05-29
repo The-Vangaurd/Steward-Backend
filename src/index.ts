@@ -18,14 +18,16 @@ import { globalRateLimiter } from './middlewares/rateLimiter.middleware';
 import { startAnalyticsWorker, startAnalyticsCron, startSessionCleanupCron } from './jobs/analytics.job';
 
 // ── Routes ────────────────────────────────────────────────────────────────────
-import healthRouter    from './routes/health.routes';
-import authRouter      from './routes/auth.routes';
-import menuRouter      from './routes/menu.routes';
-import orderRouter     from './routes/order.routes';
+import healthRouter from './routes/health.routes';
+import authRouter from './routes/auth.routes';
+import menuRouter from './routes/menu.routes';
+import orderRouter from './routes/order.routes';
 import analyticsRouter from './routes/analytics.routes';
-import staffRouter     from './routes/staff.routes';
-import settingsRouter  from './routes/settings.routes';
-import themeRouter     from './routes/theme.routes';
+import staffRouter from './routes/staff.routes';
+import settingsRouter from './routes/settings.routes';
+import themeRouter from './routes/theme.routes';
+import shiftRouter from './routes/shift.routes';
+import auditRouter from './routes/audit.routes';
 
 const app = express();
 app.set('trust proxy', 1); // Trust reverse proxy headers (Render TLS termination)
@@ -105,15 +107,16 @@ app.use(
 app.use(globalRateLimiter);
 
 // ── Routes ────────────────────────────────────────────────────────────────────
-app.use('/health',             healthRouter);
-app.use('/v1/auth',            authRouter);
-app.use('/v1/menu',            menuRouter);
-app.use('/v1/menu',            themeRouter);   // GET /v1/menu/:slug/theme (public)
-app.use('/v1/orders',          orderRouter);
+app.use('/health', healthRouter);
+app.use('/v1/auth', authRouter);
+app.use('/v1/menu', menuRouter);
+app.use('/v1/menu', themeRouter);   // GET /v1/menu/:slug/theme (public)
+app.use('/v1/orders', orderRouter);
 app.use('/v1/admin/analytics', analyticsRouter);
-app.use('/v1/admin/staff',     staffRouter);
-app.use('/v1/settings',        settingsRouter);
-
+app.use('/v1/admin/staff', staffRouter);
+app.use('/v1/settings', settingsRouter);
+app.use('/v1/shifts', shiftRouter);
+app.use('/v1/audit', auditRouter);
 // ── 404 & error handlers ──────────────────────────────────────────────────────
 app.use(notFoundHandler);
 app.use(errorHandler);
@@ -180,7 +183,7 @@ const shutdown = async (signal: string): Promise<void> => {
 };
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT',  () => shutdown('SIGINT'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 process.on('uncaughtException', (err) => {
   logger.error('Uncaught exception', { error: err.message, stack: err.stack });

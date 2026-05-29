@@ -62,6 +62,7 @@ model Restaurant {
   orders     Order[]
   users      User[]
   settings   RestaurantSettings?
+  shifts     Shift[]
 
   // Perf: analytics job queries isActive frequently across all restaurants
   @@index([isActive])
@@ -229,10 +230,12 @@ model Order {
   restaurant    Restaurant           @relation(fields: [restaurantId], references: [id], onDelete: Restrict)
   items         OrderItem[]
   statusHistory OrderStatusHistory[]
+  guestId       String?              @db.VarChar(100)
 
   @@index([restaurantId, status])
   @@index([restaurantId, createdAt])
   @@index([restaurantId, status, createdAt])
+  @@index([guestId])
   @@map("orders")
 }
 
@@ -283,4 +286,42 @@ model DailyAnalytics {
   @@unique([restaurantId, date])
   @@index([restaurantId, date])
   @@map("daily_analytics")
+}
+
+// New models:
+
+model Shift {
+  id           String   @id @default(cuid())
+  restaurantId String
+  name         String   @db.VarChar(100)
+  dayOfWeek    Int      // 0=Sun, 1=Mon, ... 6=Sat
+  startTime    String   @db.VarChar(5)  // "HH:MM"
+  endTime      String   @db.VarChar(5)  // "HH:MM"
+  isEnabled    Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@index([restaurantId, dayOfWeek])
+  @@map("shifts")
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  restaurantId String
+  actorId      String?
+  actorEmail   String?  @db.VarChar(255)
+  action       String   @db.VarChar(100)
+  resourceType String   @db.VarChar(100)
+  resourceId   String?
+  metadata     Json?
+  ipAddress    String?  @db.VarChar(45)
+  userAgent    String?  @db.Text
+  createdAt    DateTime @default(now())
+
+  @@index([restaurantId, createdAt])
+  @@index([restaurantId, action])
+  @@index([actorId])
+  @@map("audit_logs")
 }

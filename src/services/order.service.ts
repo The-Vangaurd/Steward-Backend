@@ -157,6 +157,7 @@ export const orderService = {
           taxAmount,
           totalAmount,
           estimatedMins: maxPrep + 5,
+          guestId: input.guestId || null,
           items: { create: orderItems },
           statusHistory: {
             create: { status: OrderStatus.NEW, note: 'Order placed' },
@@ -458,5 +459,40 @@ export const orderService = {
     ]);
 
     return { orders, meta: buildPaginationMeta(total, pagination.page, pagination.limit) };
+  },
+
+  async getGuestOrders(guestId: string, restaurantSlug: string) {
+    const restaurant = await prisma.restaurant.findUnique({
+      where: { slug: restaurantSlug }
+    });
+    if (!restaurant) throw ApiError.notFound('Restaurant not found');
+
+    return prisma.order.findMany({
+      where: {
+        guestId,
+        restaurantId: restaurant.id
+      },
+      select: ORDER_WITH_HISTORY_SELECT,
+      orderBy: { createdAt: 'desc' }
+    });
+  },
+
+  async cancelGuestOrder(orderId: string, guestId: string) {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      select: { id: true, status: true, guestId: true, restaurantId: true }
+    });
+    if (!order) throw ApiError.notFound('Order not found');
+    if (order.guestId !== guestId) {
+      throw ApiError.forbidden('You do not have permission to cancel this order', 'ORDER_CANCEL_FORBIDDEN');
+    }
+    if (order.status !== OrderStatus.NEW) {
+      throw ApiError.badRequest('Only NEW orders can be cancelled', 'ORDER_CANCEL_INVALID_STATUS');
+    }
+
+    return this.updateOrderStatus(orderId, order.restaurantId, {
+      status: OrderStatus.CANCELLED,
+      note: 'Cancelled by guest'
+    });
   },
 };

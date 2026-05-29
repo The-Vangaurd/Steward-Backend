@@ -31,6 +31,8 @@ router.post('/kitchen/:id/undo', ...kitchenGuard, orderController.undoOrderStatu
 router.get('/admin/list', ...adminGuard, validate(orderQuerySchema, 'query'), orderController.getAdminOrders);
 
 // ── Public ────────────────────────────────────────────────────────────────────
+router.get('/guest/orders', orderController.getGuestOrders);
+router.post('/:id/cancel', orderController.cancelGuestOrder);
 router.get('/:id/track', orderController.trackOrder);
 router.get('/:id', orderController.getOrderById);
 router.post('/:restaurantId', authRateLimiter, validate(createOrderSchema), orderController.createOrder);

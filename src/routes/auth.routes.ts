@@ -11,10 +11,11 @@ import {
   ownerRegisterSchema,
   staffLoginSchema,
 } from '../validators/auth.validator';
+import oauthRouter from './oauth.routes';
 
 const router = Router();
 
-// ── Staff registration (existing — KITCHEN_STAFF) ──────────────────────────
+// ── Staff registration ─────────────────────────────────────────────────────
 router.post(
   '/register',
   authRateLimiter,
@@ -24,7 +25,7 @@ router.post(
   authController.register,
 );
 
-// ── Owner + restaurant registration (existing) ─────────────────────────────
+// ── Owner + restaurant registration ───────────────────────────────────────
 router.post(
   '/owner-register',
   authRateLimiter,
@@ -32,17 +33,18 @@ router.post(
   authController.registerOwner,
 );
 
-// ── Owner / admin email + password login (existing) ────────────────────────
+// ── Email + password login ────────────────────────────────────────────────
 router.post('/login', authRateLimiter, validate(loginSchema), authController.login);
 
-// ── Staff restaurant-code + PIN login (NEW) ────────────────────────────────
-// Intentionally uses the same authRateLimiter as email login to prevent
-// brute-force against the 4-digit PIN space (10,000 combinations).
+// ── Staff PIN login ───────────────────────────────────────────────────────
 router.post('/staff-login', authRateLimiter, validate(staffLoginSchema), authController.staffLogin);
 
-// ── Token management ───────────────────────────────────────────────────────
+// ── Token management ──────────────────────────────────────────────────────
 router.post('/refresh', validate(refreshTokenSchema), authController.refresh);
 router.post('/logout', authController.logout);
 router.get('/me', authenticate, authController.me);
+
+// ── Google OAuth (mounted at /google and /google/callback) ────────────────
+router.use('/', oauthRouter);
 
 export default router;
