@@ -55,6 +55,7 @@ const ORDER_WITH_HISTORY_SELECT = {
   notes: true,
   subtotal: true,
   taxAmount: true,
+  serviceChargeAmount: true,
   totalAmount: true,
   estimatedMins: true,
   startedPreparingAt: true,
@@ -89,6 +90,7 @@ const GUEST_ORDER_SELECT = {
   notes: true,
   subtotal: true,
   taxAmount: true,
+  serviceChargeAmount: true,
   totalAmount: true,
   estimatedMins: true,
   startedPreparingAt: true,
@@ -119,7 +121,7 @@ export const orderService = {
       where: { OR: [{ slug: slugOrId }, { id: slugOrId }], isActive: true },
       select: {
         id: true,
-        settings: { select: { taxRate: true } },
+        settings: { select: { taxRate: true, serviceCharge: true, autoAcceptOrders: true } },
       },
     });
     if (!restaurant) throw ApiError.notFound('Restaurant not found');
@@ -128,6 +130,9 @@ export const orderService = {
     const taxRate = restaurant.settings
       ? Number(restaurant.settings.taxRate)
       : 0.05;
+    const serviceChargeRate = restaurant.settings
+      ? Number(restaurant.settings.serviceCharge)
+      : 0.00;
 
     const menuItemIds = input.items.map((i) => i.menuItemId);
     const uniqueMenuItemIds = Array.from(new Set(menuItemIds));
@@ -171,13 +176,17 @@ export const orderService = {
     });
 
     const subtotal = orderItems.reduce((sum, i) => sum + i.subtotal, 0);
+    if (subtotal <= 0) {
+      throw ApiError.badRequest('Order total must be greater than zero', 'ORDER_TOTAL_ZERO');
+    }
     const taxAmount = Math.round(subtotal * taxRate * 100) / 100;
-    const totalAmount = subtotal + taxAmount;
+    const serviceChargeAmount = Math.round(subtotal * serviceChargeRate * 100) / 100;
+    const totalAmount = subtotal + taxAmount + serviceChargeAmount;
 
     const maxPrep = Math.max(...menuItems.map((m) => m.prepTimeMins));
     const orderNumber = await generateOrderNumber(restaurantId);
 
-    const [order] = await prisma.$transaction([
+    let [order] = await prisma.$transaction([
       prisma.order.create({
         data: {
           orderNumber,
@@ -192,6 +201,7 @@ export const orderService = {
           customerEmail: input.customerEmail,
           subtotal,
           taxAmount,
+          serviceChargeAmount,
           totalAmount,
           estimatedMins: maxPrep + 5,
           guestId: input.guestId || null,
@@ -211,6 +221,15 @@ export const orderService = {
     emitToKitchen(restaurantId, SOCKET_EVENTS.ORDER_CREATED, order); // 'order_created'
     emitToKitchen(restaurantId, SOCKET_EVENTS.KITCHEN_NEW_ORDER, order); // legacy 'kitchen:new_order'
     emitToRestaurant(restaurantId, SOCKET_EVENTS.ORDER_CREATED_LEGACY, order); // legacy 'order:created'
+
+    // S3-B: Handle autoAcceptOrders setting
+    const autoAccept = restaurant.settings?.autoAcceptOrders ?? false;
+    if (autoAccept) {
+      order = await this.updateOrderStatus(order.id, restaurantId, {
+        status: OrderStatus.PREPARING,
+        note: 'Order accepted automatically',
+      });
+    }
 
     let recallToken: string | undefined;
     if (order.guestId) {
@@ -491,6 +510,7 @@ export const orderService = {
           customerPhone: true,
           subtotal: true,
           taxAmount: true,
+          serviceChargeAmount: true,
           totalAmount: true,
           estimatedMins: true,
           createdAt: true,
@@ -540,5 +560,27 @@ export const orderService = {
       status: OrderStatus.CANCELLED,
       note: 'Cancelled by guest'
     });
+  },
+
+  async lookupOrder(orderNumber: string, restaurantSlug: string) {
+    const restaurant = await prisma.restaurant.findUnique({
+      where: { slug: restaurantSlug }
+    });
+    if (!restaurant) throw ApiError.notFound('Restaurant not found');
+
+    const order = await prisma.order.findFirst({
+      where: {
+        orderNumber: orderNumber.trim().toUpperCase(),
+        restaurantId: restaurant.id,
+      },
+      select: {
+        id: true,
+        status: true,
+        createdAt: true,
+      },
+    });
+
+    if (!order) throw ApiError.notFound('Order not found');
+    return order;
   },
 };

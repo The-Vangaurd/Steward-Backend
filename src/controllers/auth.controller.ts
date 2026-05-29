@@ -117,4 +117,31 @@ export const authController = {
     const user = await authService.me((req as AuthenticatedRequest).user.id);
     sendSuccess(res, HTTP_STATUS.OK, user);
   }),
+
+  // ── New: verify email ──────────────────────────────────────────────────────
+  verifyEmail: asyncHandler(async (req: Request, res: Response) => {
+    const { token } = req.query;
+    if (!token) {
+      throw ApiError.badRequest('Missing verification token');
+    }
+
+    const { getVerificationEmail, deleteVerificationToken } = require('../utils/emailVerification');
+    const email = await getVerificationEmail(token as string);
+    if (!email) {
+      throw ApiError.badRequest('Invalid or expired verification token');
+    }
+
+    const { prisma } = require('../config/database');
+    await prisma.user.update({
+      where: { email },
+      data: {
+        emailVerified: true,
+        isActive: true,
+      },
+    });
+
+    await deleteVerificationToken(token as string);
+
+    sendSuccess(res, HTTP_STATUS.OK, { message: 'Email verified successfully. You can now log in.' });
+  }),
 };

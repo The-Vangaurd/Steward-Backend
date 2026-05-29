@@ -119,4 +119,14 @@ export const orderController = {
     const updated = await orderService.cancelGuestOrder(req.params.id, guestId);
     sendSuccess(res, HTTP_STATUS.OK, updated);
   }),
+
+  lookupOrder: asyncHandler(async (req: Request, res: Response) => {
+    const { orderNumber, restaurantSlug } = req.query;
+    if (!orderNumber || !restaurantSlug) {
+      throw ApiError.badRequest('Missing required query parameters: orderNumber and restaurantSlug');
+    }
+
+    const order = await orderService.lookupOrder(orderNumber as string, restaurantSlug as string);
+    sendSuccess(res, HTTP_STATUS.OK, order);
+  }),
 };

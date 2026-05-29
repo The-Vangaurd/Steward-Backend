@@ -97,7 +97,7 @@ export const authService = {
         firstName: input.firstName,
         lastName: input.lastName,
         phone: input.phone,
-        role: UserRole.KITCHEN_STAFF,
+        role: (input.role ?? UserRole.KITCHEN_STAFF) as UserRole,
         restaurantId,
       },
       select: {
@@ -157,6 +157,8 @@ export const authService = {
           data: {
             firstName,
             lastName,
+            emailVerified: true,
+            isActive: true,
             restaurantId: restaurant.id,
           },
           select: {
@@ -199,6 +201,7 @@ export const authService = {
     }
 
     const passwordHash = await bcrypt.hash(input.password, SALT_ROUNDS);
+    const verifyToken = require('crypto').randomBytes(32).toString('hex');
 
     const result = await prisma.$transaction(async (tx) => {
       const restaurant = await tx.restaurant.create({
@@ -220,6 +223,8 @@ export const authService = {
           lastName,
           phone: input.phone ?? '',
           role: UserRole.ADMIN,
+          isActive: false,       // Inactive until verified
+          emailVerified: false,  // Unverified
           restaurantId: restaurant.id,
         },
         select: {
@@ -231,20 +236,12 @@ export const authService = {
       return { user, restaurant };
     });
 
-    const accessToken = signAccessToken({
-      id: result.user.id,
-      email: result.user.email,
-      role: result.user.role,
-      restaurantId: result.restaurant.id,
-    });
-    const refreshToken = signRefreshToken(result.user.id);
-
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-    await prisma.session.create({ data: { userId: result.user.id, refreshToken, expiresAt } });
+    const { setVerificationToken, sendVerificationEmail } = require('../utils/emailVerification');
+    await setVerificationToken(result.user.email, verifyToken);
+    await sendVerificationEmail(result.user.email, verifyToken);
 
     return {
-      accessToken,
-      refreshToken,
+      emailVerified: false,
       user: result.user,
       restaurant: {
         id: result.restaurant.id,
@@ -252,12 +249,20 @@ export const authService = {
         slug: result.restaurant.slug,
         restaurantCode: result.restaurant.restaurantCode,
       },
-    };
+    } as any;
   },
 
   async login(input: LoginInput) {
     const user = await prisma.user.findUnique({ where: { email: input.email } });
-    if (!user || !user.isActive) throw ApiError.unauthorized('Invalid credentials', 'INVALID_CREDENTIALS');
+    if (!user) throw ApiError.unauthorized('Invalid credentials', 'INVALID_CREDENTIALS');
+
+    if (!user.emailVerified) {
+      throw ApiError.forbidden('Please verify your email before logging in', 'EMAIL_NOT_VERIFIED');
+    }
+
+    if (!user.isActive) {
+      throw ApiError.forbidden('Your account is deactivated', 'ACCOUNT_DEACTIVATED');
+    }
 
     const valid = await bcrypt.compare(input.password, user.passwordHash);
     if (!valid) throw ApiError.unauthorized('Invalid credentials', 'INVALID_CREDENTIALS');

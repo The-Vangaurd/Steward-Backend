@@ -96,6 +96,7 @@ export const oauthService = {
                         passwordHash: placeholderHash,
                         role: UserRole.ADMIN,
                         isActive: true,
+                        emailVerified: true,
                         restaurantId: null, // No restaurant yet — must complete registration
                     },
                 });

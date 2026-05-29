@@ -43,6 +43,7 @@ router.post('/staff-login', authRateLimiter, validate(staffLoginSchema), authCon
 router.post('/refresh', validate(refreshTokenSchema), authController.refresh);
 router.post('/logout', authController.logout);
 router.get('/me', authenticate, authController.me);
+router.get('/verify-email', authController.verifyEmail);
 
 // ── Google OAuth (mounted at /google and /google/callback) ────────────────
 router.use('/', oauthRouter);
