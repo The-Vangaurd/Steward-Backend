@@ -1,4 +1,6 @@
 import { prisma } from '../config/database';
+import jwt from 'jsonwebtoken';
+import { env } from '../config/env';
 import { generateOrderNumber } from '../utils/orderNumber';
 import { cacheGet, cacheSet, cacheDel } from '../utils/redis';
 import { CACHE_KEYS, CACHE_TTL, SOCKET_EVENTS } from '../constants';
@@ -175,7 +177,16 @@ export const orderService = {
     emitToKitchen(restaurantId, SOCKET_EVENTS.KITCHEN_NEW_ORDER, order); // legacy 'kitchen:new_order'
     emitToRestaurant(restaurantId, SOCKET_EVENTS.ORDER_CREATED_LEGACY, order); // legacy 'order:created'
 
-    return order;
+    let recallToken: string | undefined;
+    if (order.guestId) {
+      recallToken = jwt.sign(
+        { orderId: order.id, guestId: order.guestId, restaurantSlug: slugOrId },
+        env.JWT_GUEST_SECRET,
+        { expiresIn: '30d' }
+      );
+    }
+
+    return { ...order, recallToken };
   },
 
   async getOrderById(id: string) {

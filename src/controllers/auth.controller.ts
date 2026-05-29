@@ -93,7 +93,7 @@ export const authController = {
 
   // ── Existing: refresh ─────────────────────────────────────────────────────
   refresh: asyncHandler(async (req: Request, res: Response) => {
-    const refreshToken = req.cookies?.refreshToken;
+    const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken;
     if (!refreshToken) throw ApiError.unauthorized('No refresh token provided');
 
     const tokens = await authService.refresh(refreshToken);

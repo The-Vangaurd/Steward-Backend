@@ -1,4 +1,6 @@
 import { Request, Response } from 'express';
+import jwt from 'jsonwebtoken';
+import { env } from '../config/env';
 import { orderService } from '../services/order.service';
 import { asyncHandler } from '../utils/asyncHandler';
 import { sendSuccess } from '../utils/response';
@@ -69,6 +71,24 @@ export const orderController = {
 
     const orders = await orderService.getGuestOrders(guestId as string, restaurantSlug as string);
     sendSuccess(res, HTTP_STATUS.OK, orders);
+  }),
+
+  recallOrders: asyncHandler(async (req: Request, res: Response) => {
+    const { token } = req.query;
+    if (!token) {
+      throw ApiError.badRequest('Missing required query parameter: token');
+    }
+
+    try {
+      const decoded = jwt.verify(token as string, env.JWT_GUEST_SECRET) as {
+        guestId: string;
+        restaurantSlug: string;
+      };
+      const orders = await orderService.getGuestOrders(decoded.guestId, decoded.restaurantSlug);
+      sendSuccess(res, HTTP_STATUS.OK, orders);
+    } catch (err) {
+      throw ApiError.unauthorized('Invalid or expired recall token');
+    }
   }),
 
   cancelGuestOrder: asyncHandler(async (req: Request, res: Response) => {
