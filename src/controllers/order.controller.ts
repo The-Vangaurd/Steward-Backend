@@ -7,6 +7,7 @@ import { sendSuccess } from '../utils/response';
 import { HTTP_STATUS } from '../constants';
 import { AuthenticatedRequest } from '../types';
 import { ApiError } from '../utils/ApiError';
+import { verifySignedGuestId } from '../utils/guestToken';
 
 export const orderController = {
   // ── Customer ───────────────────────────────────────────────────────────────
@@ -64,9 +65,27 @@ export const orderController = {
   }),
 
   getGuestOrders: asyncHandler(async (req: Request, res: Response) => {
-    const { guestId, restaurantSlug } = req.query;
+    const { guestId, restaurantSlug, sig, token } = req.query;
+
+    if (token) {
+      try {
+        const decoded = jwt.verify(token as string, env.JWT_GUEST_SECRET) as {
+          guestId: string;
+          restaurantSlug: string;
+        };
+        const orders = await orderService.getGuestOrders(decoded.guestId, decoded.restaurantSlug);
+        return sendSuccess(res, HTTP_STATUS.OK, orders);
+      } catch (err) {
+        throw ApiError.unauthorized('Invalid or expired recall token');
+      }
+    }
+
     if (!guestId || !restaurantSlug) {
       throw ApiError.badRequest('Missing required query parameters: guestId and restaurantSlug');
+    }
+
+    if (!sig || !verifySignedGuestId(guestId as string, sig as string)) {
+      throw ApiError.unauthorized('Invalid or unsigned guest identity', 'UNSIGNED_GUEST_ID');
     }
 
     const orders = await orderService.getGuestOrders(guestId as string, restaurantSlug as string);

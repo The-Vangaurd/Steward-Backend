@@ -7,7 +7,7 @@ import { AuthenticatedRequest } from '../types';
 import { ApiError } from '../utils/ApiError';
 import { env } from '../config/env';
 
-const getCookieOptions = () => {
+export const getCookieOptions = () => {
   const isProd = env.NODE_ENV === 'production';
   return {
     httpOnly: true,

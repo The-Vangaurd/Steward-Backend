@@ -5,6 +5,7 @@ import { z } from 'zod';
 const PLACEHOLDER_JWT_SECRETS = [
   'your-super-secret-jwt-key-minimum-32-characters',
   'your-super-secret-refresh-key-minimum-32-characters',
+  'guest-secret-for-development-only-minimum-32-chars',
 ];
 
 const PLACEHOLDER_REDIS_PATTERNS = [
@@ -51,8 +52,7 @@ const envSchema = z.object({
 
   JWT_GUEST_SECRET: z
     .string()
-    .min(32, { message: 'JWT_GUEST_SECRET must be at least 32 characters' })
-    .default('guest-secret-for-development-only-minimum-32-chars'),
+    .min(32, { message: 'JWT_GUEST_SECRET must be at least 32 characters' }),
 
   JWT_EXPIRES_IN: z.string().default('15m'),
 
@@ -123,6 +123,13 @@ if (data.NODE_ENV === 'production') {
   if (PLACEHOLDER_JWT_SECRETS.includes(data.JWT_REFRESH_SECRET)) {
     console.error(
       '❌ JWT_REFRESH_SECRET is still using the placeholder value. Set a real secret before deploying.',
+    );
+    process.exit(1);
+  }
+
+  if (PLACEHOLDER_JWT_SECRETS.includes(data.JWT_GUEST_SECRET)) {
+    console.error(
+      '❌ JWT_GUEST_SECRET is still using the placeholder value. Set a real secret before deploying.',
     );
     process.exit(1);
   }

@@ -33,11 +33,26 @@ const app = express();
 app.set('trust proxy', 1); // Trust reverse proxy headers (Render TLS termination)
 const httpServer = http.createServer(app);
 
+const allowedOrigins = env.CORS_ORIGINS
+  ? env.CORS_ORIGINS.split(',').map((o) => o.replace(/['"]/g, '').trim())
+  : [];
+
 // ── Security & parsing ────────────────────────────────────────────────────────
 app.use(
   helmet({
     crossOriginEmbedderPolicy: false,
-    contentSecurityPolicy: false,
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc:     ["'self'"],
+        scriptSrc:      ["'self'"],
+        styleSrc:       ["'self'", "'unsafe-inline'"],
+        imgSrc:         ["'self'", 'data:', 'https://res.cloudinary.com'],
+        connectSrc:     ["'self'", ...allowedOrigins],
+        fontSrc:        ["'self'", 'https://fonts.gstatic.com'],
+        objectSrc:      ["'none'"],
+        frameAncestors: ["'none'"],
+      },
+    },
   }),
 );
 
@@ -47,9 +62,6 @@ app.use(
       if (!origin) return callback(null, true);
 
       // ── Explicit allowlist from CORS_ORIGINS env var ─────────────────────
-      const allowedOrigins = env.CORS_ORIGINS
-        ? env.CORS_ORIGINS.split(',').map((o) => o.replace(/['"]/g, '').trim())
-        : [];
       if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
         return callback(null, true);
       }

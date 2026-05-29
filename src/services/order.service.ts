@@ -46,11 +46,46 @@ const ORDER_WITH_HISTORY_SELECT = {
   id: true,
   orderNumber: true,
   restaurantId: true,
+  guestId: true,
   status: true,
   orderType: true,
   tableNumber: true,
   customerName: true,
   customerPhone: true,
+  notes: true,
+  subtotal: true,
+  taxAmount: true,
+  totalAmount: true,
+  estimatedMins: true,
+  startedPreparingAt: true,
+  readyAt: true,
+  completedAt: true,
+  cancelledAt: true,
+  createdAt: true,
+  updatedAt: true,
+  items: {
+    select: {
+      id: true,
+      name: true,
+      price: true,
+      quantity: true,
+      subtotal: true,
+      notes: true,
+    },
+  },
+  statusHistory: {
+    orderBy: { createdAt: 'asc' as const },
+    select: { status: true, note: true, createdAt: true },
+  },
+} as const;
+
+const GUEST_ORDER_SELECT = {
+  id: true,
+  orderNumber: true,
+  restaurantId: true,
+  status: true,
+  orderType: true,
+  tableNumber: true,
   notes: true,
   subtotal: true,
   taxAmount: true,
@@ -483,7 +518,7 @@ export const orderService = {
         guestId,
         restaurantId: restaurant.id
       },
-      select: ORDER_WITH_HISTORY_SELECT,
+      select: GUEST_ORDER_SELECT,
       orderBy: { createdAt: 'desc' }
     });
   },
