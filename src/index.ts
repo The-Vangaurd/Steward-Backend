@@ -28,6 +28,7 @@ import settingsRouter from './routes/settings.routes';
 import themeRouter from './routes/theme.routes';
 import shiftRouter from './routes/shift.routes';
 import auditRouter from './routes/audit.routes';
+import paymentRouter from './routes/payment.routes';
 
 const app = express();
 app.set('trust proxy', 1); // Trust reverse proxy headers (Render TLS termination)
@@ -130,6 +131,7 @@ app.use('/v1/admin/staff', staffRouter);
 app.use('/v1/settings', settingsRouter);
 app.use('/v1/shifts', shiftRouter);
 app.use('/v1/audit', auditRouter);
+app.use('/v1/payment', paymentRouter);
 // ── 404 & error handlers ──────────────────────────────────────────────────────
 app.use(notFoundHandler);
 app.use(errorHandler);

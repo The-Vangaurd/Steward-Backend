@@ -9,6 +9,7 @@ const adminGuard = [authenticate, requireRole(UserRole.ADMIN, UserRole.SUPER_ADM
 
 router.get('/', ...adminGuard, staffController.listStaff);
 router.post('/', ...adminGuard, staffController.createStaff);
+router.post('/invite', ...adminGuard, staffController.inviteStaff);
 router.patch('/:id', ...adminGuard, staffController.updateStaff);
 router.delete('/:id', ...adminGuard, staffController.deactivateStaff);
 

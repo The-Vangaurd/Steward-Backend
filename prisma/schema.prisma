@@ -232,6 +232,11 @@ model Order {
   statusHistory OrderStatusHistory[]
   guestId       String?              @db.VarChar(100)
 
+  paymentMethod       String   @default("cash")
+  paymentStatus       String   @default("not_required")
+  razorpayOrderId     String?
+  razorpayPaymentId   String?
+
   @@index([restaurantId, status])
   @@index([restaurantId, createdAt])
   @@index([restaurantId, status, createdAt])

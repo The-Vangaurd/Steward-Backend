@@ -88,4 +88,36 @@ export const staffService = {
       select: USER_SELECT,
     });
   },
+
+  async inviteStaffByGmail(restaurantId: string, data: {
+    email: string;
+    firstName?: string;
+    lastName?: string;
+    role: UserRole;
+  }): Promise<{ email: string }> {
+    const existing = await prisma.user.findUnique({ where: { email: data.email } });
+
+    if (existing) {
+      if (existing.restaurantId !== restaurantId) {
+        throw ApiError.conflict('Email belongs to a different restaurant', 'EMAIL_CONFLICT');
+      }
+      throw ApiError.conflict('Staff member already exists in this restaurant', 'ALREADY_EXISTS');
+    }
+
+    await prisma.user.create({
+      data: {
+        email: data.email,
+        firstName: data.firstName ?? '',
+        lastName: data.lastName ?? '',
+        role: data.role,
+        restaurantId,
+        emailVerified: true,
+        isActive: true,
+        // No passwordHash — Gmail invite users must sign in via Google OAuth
+      },
+      select: { id: true },
+    });
+
+    return { email: data.email };
+  },
 };

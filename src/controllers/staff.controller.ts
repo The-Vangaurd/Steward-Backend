@@ -38,4 +38,10 @@ export const staffController = {
     await staffService.updateStaffMember(restaurantId, req.params.id, { isActive: false });
     sendSuccess(res, HTTP_STATUS.OK);
   }),
+
+  inviteStaff: asyncHandler(async (req: Request, res: Response) => {
+    const restaurantId = (req as AuthenticatedRequest).user.restaurantId!;
+    const result = await staffService.inviteStaffByGmail(restaurantId, req.body);
+    sendSuccess(res, HTTP_STATUS.CREATED, result);
+  }),
 };

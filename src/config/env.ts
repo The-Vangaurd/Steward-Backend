@@ -76,6 +76,10 @@ const envSchema = z.object({
     .email({ message: 'FROM_EMAIL must be a valid email address' })
     .optional(),
 
+  // ── Optional Razorpay ─────────────────────────────────────────────────────
+  RAZORPAY_KEY_ID: z.string().optional(),
+  RAZORPAY_KEY_SECRET: z.string().optional(),
+
   // ── Optional Observability ────────────────────────────────────────────────
   SENTRY_DSN: z
     .string()
