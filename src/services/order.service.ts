@@ -157,22 +157,40 @@ export const orderService = {
       const tzDate = new Date(tzDateString);
       const dayNum = tzDate.getDay();
 
-      const hours = settings.openingHours as Array<{ day: number; open: string; close: string; closed: boolean }> | null;
-      if (hours && Array.isArray(hours)) {
-        const todayHours = hours.find((h) => h.day === dayNum);
-        if (todayHours?.closed) {
-          throw ApiError.badRequest("The restaurant is closed today.", "STORE_CLOSED");
+      const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
+      const hours = settings.openingHours as
+        | Record<string, { open: string; close: string; closed: boolean }>
+        | Array<{ day: number; open: string; close: string; closed: boolean }>
+        | null;
+
+      let todayHours:
+        | { open: string; close: string; closed: boolean }
+        | undefined;
+
+      if (hours) {
+        if (Array.isArray(hours)) {
+          todayHours = hours.find((h) => h.day === dayNum);
+        } else {
+          todayHours = hours[DAY_KEYS[dayNum]];
         }
-        if (todayHours) {
-          const localTime = new Intl.DateTimeFormat("en-GB", {
-            timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false,
-          }).format(now);
-          if (localTime < todayHours.open || localTime >= todayHours.close) {
-            throw ApiError.badRequest(
-              `We're only open ${todayHours.open}–${todayHours.close} today.`,
-              "STORE_CLOSED"
-            );
-          }
+      }
+
+      if (todayHours?.closed) {
+        throw ApiError.badRequest("The restaurant is closed today.", "STORE_CLOSED");
+      }
+
+      if (todayHours) {
+        const localTime = new Intl.DateTimeFormat("en-GB", {
+          timeZone: tz,
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        }).format(now);
+        if (localTime < todayHours.open || localTime >= todayHours.close) {
+          throw ApiError.badRequest(
+            `We're only open ${todayHours.open}–${todayHours.close} today.`,
+            "STORE_CLOSED"
+          );
         }
       }
     }
@@ -614,7 +632,7 @@ export const orderService = {
     });
   },
 
-  async lookupOrder(orderNumber: string, restaurantSlug: string, customerPhoneSuffix: string) {
+  async lookupOrder(orderNumber: string, restaurantSlug: string, customerPhoneSuffix?: string) {
     const restaurant = await prisma.restaurant.findUnique({
       where: { slug: restaurantSlug }
     });
@@ -635,15 +653,16 @@ export const orderService = {
 
     if (!order) throw ApiError.notFound('Order not found or details mismatch');
 
-    // Verify phone suffix if the order has a phone number
-    if (!order.customerPhone || !order.customerPhone.endsWith(customerPhoneSuffix)) {
+    if (customerPhoneSuffix) {
+      if (!order.customerPhone || !order.customerPhone.endsWith(customerPhoneSuffix)) {
         throw ApiError.notFound('Order not found or details mismatch');
+      }
     }
 
     return {
       id: order.id,
       status: order.status,
-      createdAt: order.createdAt
+      createdAt: order.createdAt,
     };
   },
 };
