@@ -121,10 +121,59 @@ export const orderService = {
       where: { OR: [{ slug: slugOrId }, { id: slugOrId }], isActive: true },
       select: {
         id: true,
-        settings: { select: { taxRate: true, serviceCharge: true, autoAcceptOrders: true } },
+        timezone: true,
+        settings: {
+          select: {
+            taxRate: true,
+            serviceCharge: true,
+            autoAcceptOrders: true,
+            offlineMode: true,
+            offlineModeMessage: true,
+            openingHours: true,
+            estimatedPrepMins: true,
+          },
+        },
       },
     });
     if (!restaurant) throw ApiError.notFound('Restaurant not found');
+
+    const settings = restaurant.settings;
+
+    // 1. Enforce offline mode
+    if (settings?.offlineMode) {
+      throw ApiError.badRequest(
+        settings.offlineModeMessage ?? 'Restaurant is currently closed.',
+        'OFFLINE_MODE'
+      );
+    }
+
+    // 2. Enforce opening hours
+    if (settings?.openingHours) {
+      const now = new Date();
+      const dayNum = now.getDay();
+      const dayMap = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+      const dayKey = dayMap[dayNum];
+
+      const hours = settings.openingHours as Array<{ day: number; open: string; close: string; closed: boolean }> | null;
+      if (hours && Array.isArray(hours)) {
+        const todayHours = hours.find((h) => h.day === dayNum);
+        if (todayHours?.closed) {
+          throw ApiError.badRequest("The restaurant is closed today.", "STORE_CLOSED");
+        }
+        if (todayHours) {
+          const tz = restaurant.timezone ?? "Asia/Kolkata";
+          const localTime = new Intl.DateTimeFormat("en-GB", {
+            timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false,
+          }).format(now);
+          if (localTime < todayHours.open || localTime >= todayHours.close) {
+            throw ApiError.badRequest(
+              `We're only open ${todayHours.open}–${todayHours.close} today.`,
+              "STORE_CLOSED"
+            );
+          }
+        }
+      }
+    }
 
     const restaurantId = restaurant.id;
     const taxRate = restaurant.settings
@@ -240,7 +289,7 @@ export const orderService = {
       );
     }
 
-    return { ...order, recallToken };
+    return { ...order, recallToken, estimatedPrepMins: restaurant.settings?.estimatedPrepMins ?? 20 };
   },
 
   async getOrderById(id: string) {
