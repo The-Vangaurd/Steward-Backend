@@ -73,10 +73,10 @@ export async function sendVerificationEmail(email: string, token: string): Promi
       body: JSON.stringify({
         from: fromEmail,
         to: email,
-        subject: 'Verify your email — SpiceOS',
+        subject: 'Verify your email — Steward',
         html: `
           <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
-            <h2 style="color: #4f46e5; margin-bottom: 20px;">Welcome to SpiceOS!</h2>
+            <h2 style="color: #4f46e5; margin-bottom: 20px;">Welcome to Steward!</h2>
             <p style="font-size: 16px; line-height: 1.5; color: #1e293b;">Thank you for registering. Please click the button below to verify your email and activate your account:</p>
             <div style="margin: 30px 0; text-align: center;">
               <a href="${verifyUrl}" style="background-color: #4f46e5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 14px; display: inline-block;">Verify Email Address</a>

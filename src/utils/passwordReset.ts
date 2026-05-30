@@ -72,7 +72,7 @@ export async function sendPasswordResetEmail(email: string, token: string): Prom
       body: JSON.stringify({
         from: fromEmail,
         to: email,
-        subject: 'Reset your password — SpiceOS',
+        subject: 'Reset your password — Steward',
         html: `
           <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
             <h2 style="color: #4f46e5; margin-bottom: 20px;">Password Reset Request</h2>
