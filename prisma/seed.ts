@@ -13,6 +13,7 @@ async function main() {
     create: {
       name: 'Spice Garden',
       slug: 'spice-garden',
+      restaurantCode: 'SPICEG',
       description: 'Authentic Indian cuisine with a modern twist',
       phone: '+91 98765 43210',
       email: 'hello@spicegarden.com',
@@ -34,7 +35,10 @@ async function main() {
 
   const admin = await prisma.user.upsert({
     where: { email: 'admin@spicegarden.com' },
-    update: {},
+    update: {
+      emailVerified: true,
+      isActive: true,
+    },
     create: {
       email: 'admin@spicegarden.com',
       passwordHash: hash,
@@ -42,12 +46,17 @@ async function main() {
       lastName: 'Kumar',
       role: UserRole.ADMIN,
       restaurantId: restaurant.id,
+      emailVerified: true,
+      isActive: true,
     },
   });
 
   const kitchenUser = await prisma.user.upsert({
     where: { email: 'kitchen@spicegarden.com' },
-    update: {},
+    update: {
+      emailVerified: true,
+      isActive: true,
+    },
     create: {
       email: 'kitchen@spicegarden.com',
       passwordHash: await bcrypt.hash('Kitchen@1234', 12),
@@ -55,6 +64,8 @@ async function main() {
       lastName: 'Chef',
       role: UserRole.KITCHEN_STAFF,
       restaurantId: restaurant.id,
+      emailVerified: true,
+      isActive: true,
     },
   });
 
