@@ -296,7 +296,7 @@ export const orderService = {
 
   async getOrderById(id: string) {
     const cacheKey = CACHE_KEYS.order(id);
-    const cached = await cacheGet(cacheKey);
+    const cached = await cacheGet<any>(cacheKey);
     if (cached) return cached;
 
     const order = await prisma.order.findUnique({
