@@ -41,6 +41,7 @@ const allowedOrigins = env.CORS_ORIGINS
 app.use(
   helmet({
     crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
     contentSecurityPolicy: {
       directives: {
         defaultSrc:     ["'self'"],
