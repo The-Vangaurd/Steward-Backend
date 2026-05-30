@@ -176,4 +176,11 @@ export const orderController = {
     );
     sendSuccess(res, HTTP_STATUS.OK, order);
   }),
+
+  markOrderAsPaid: asyncHandler(async (req: Request, res: Response) => {
+    const restaurantId = (req as AuthenticatedRequest).user.restaurantId;
+    if (!restaurantId) throw ApiError.forbidden('No restaurant assigned');
+    const updated = await orderService.markOrderAsPaid(req.params.id, restaurantId);
+    sendSuccess(res, HTTP_STATUS.OK, updated);
+  }),
 };

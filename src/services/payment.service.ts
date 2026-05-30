@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { env } from '../config/env';
 import { ApiError } from '../utils/ApiError';
-import prisma from '../config/database';
+import { prisma } from '../config/database';
 
 export const paymentService = {
   async createRazorpayOrder(stewardOrderId: string) {

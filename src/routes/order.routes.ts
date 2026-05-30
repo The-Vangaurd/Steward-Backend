@@ -29,6 +29,8 @@ router.post('/kitchen/:id/undo', ...kitchenGuard, orderController.undoOrderStatu
 
 // ── Admin ─────────────────────────────────────────────────────────────────────
 router.get('/admin/list', ...adminGuard, validate(orderQuerySchema, 'query'), orderController.getAdminOrders);
+router.patch('/admin/:id/status', ...adminGuard, validate(updateOrderStatusSchema), orderController.updateOrderStatus);
+router.post('/admin/:id/pay', ...adminGuard, orderController.markOrderAsPaid);
 
 // ── Public ────────────────────────────────────────────────────────────────────
 router.get('/guest/orders', orderController.getGuestOrders);

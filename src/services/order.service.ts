@@ -341,6 +341,11 @@ export const orderService = {
         completedAt: true,
         cancelledAt: true,
         guestId: true,
+        restaurantId: true,
+        razorpayOrderId: true,
+        totalAmount: true,
+        paymentMethod: true,
+        paymentStatus: true,
         items: {
           select: {
             id: true,
@@ -664,5 +669,53 @@ export const orderService = {
       status: order.status,
       createdAt: order.createdAt,
     };
+  },
+
+  async markOrderAsPaid(orderId: string, restaurantId: string) {
+    const updated = await prisma.$transaction(async (tx) => {
+      const order = await tx.order.findUnique({
+        where: { id: orderId },
+        select: { id: true, paymentStatus: true, restaurantId: true },
+      });
+      if (!order || order.restaurantId !== restaurantId) {
+        throw ApiError.notFound('Order not found');
+      }
+
+      if (order.paymentStatus === 'paid') {
+        throw ApiError.badRequest('Order is already marked as paid');
+      }
+
+      const updateResult = await tx.order.updateMany({
+        where: { id: orderId },
+        data: { paymentStatus: 'paid' },
+      });
+
+      if (updateResult.count !== 1) {
+        throw ApiError.conflict('Order payment status could not be updated.', 'ORDER_PAYMENT_UPDATE_FAILED');
+      }
+
+      const refreshed = await tx.order.findUnique({
+        where: { id: orderId },
+        select: ORDER_WITH_HISTORY_SELECT,
+      });
+
+      if (!refreshed) throw ApiError.notFound('Order not found after update');
+      return refreshed;
+    });
+
+    await Promise.all([
+      cacheDel(CACHE_KEYS.order(orderId)),
+      cacheDel(CACHE_KEYS.kitchenOrders(restaurantId)),
+    ]);
+
+    // Emit to sync clients
+    emitToOrder(orderId, SOCKET_EVENTS.ORDER_UPDATED, updated);
+    emitToOrder(orderId, SOCKET_EVENTS.ORDER_UPDATED_LEGACY, updated);
+    emitToKitchen(restaurantId, SOCKET_EVENTS.ORDER_UPDATED, updated);
+    emitToKitchen(restaurantId, SOCKET_EVENTS.ORDER_UPDATED_LEGACY, updated);
+    emitToAdmin(restaurantId, SOCKET_EVENTS.ORDER_UPDATED, updated);
+    emitToRestaurant(restaurantId, SOCKET_EVENTS.ORDER_UPDATED, updated);
+
+    return updated;
   },
 };

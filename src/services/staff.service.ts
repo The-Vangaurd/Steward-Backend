@@ -113,7 +113,7 @@ export const staffService = {
         restaurantId,
         emailVerified: true,
         isActive: true,
-        // No passwordHash — Gmail invite users must sign in via Google OAuth
+        passwordHash: '', // Gmail invite users must sign in via Google OAuth
       },
       select: { id: true },
     });
