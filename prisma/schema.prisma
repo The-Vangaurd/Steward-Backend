@@ -88,8 +88,6 @@ model RestaurantSettings {
   accentColor     String?  @db.VarChar(20)
   fontHeading     String?  @db.VarChar(100)
   fontBody        String?  @db.VarChar(100)
-  /// Raw CSS injected into the public menu page (sanitised at write time).
-  customCss       String?  @db.Text
 
   // ── Operations ─────────────────────────────────────────────────────────────
   /// JSON array of { day: 0-6, open: "HH:MM", close: "HH:MM", closed: bool }

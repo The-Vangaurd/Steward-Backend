@@ -150,9 +150,12 @@ export const orderService = {
     // 2. Enforce opening hours
     if (settings?.openingHours) {
       const now = new Date();
-      const dayNum = now.getDay();
-      const dayMap = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-      const dayKey = dayMap[dayNum];
+      const tz = restaurant.timezone ?? "Asia/Kolkata";
+      
+      // Calculate day number (0-6) relative to the restaurant's timezone
+      const tzDateString = now.toLocaleString("en-US", { timeZone: tz });
+      const tzDate = new Date(tzDateString);
+      const dayNum = tzDate.getDay();
 
       const hours = settings.openingHours as Array<{ day: number; open: string; close: string; closed: boolean }> | null;
       if (hours && Array.isArray(hours)) {
@@ -161,7 +164,6 @@ export const orderService = {
           throw ApiError.badRequest("The restaurant is closed today.", "STORE_CLOSED");
         }
         if (todayHours) {
-          const tz = restaurant.timezone ?? "Asia/Kolkata";
           const localTime = new Intl.DateTimeFormat("en-GB", {
             timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false,
           }).format(now);
@@ -320,6 +322,7 @@ export const orderService = {
         readyAt: true,
         completedAt: true,
         cancelledAt: true,
+        guestId: true,
         items: {
           select: {
             id: true,
@@ -611,11 +614,11 @@ export const orderService = {
     });
   },
 
-  async lookupOrder(orderNumber: string, restaurantSlug: string) {
+  async lookupOrder(orderNumber: string, restaurantSlug: string, customerPhoneSuffix: string) {
     const restaurant = await prisma.restaurant.findUnique({
       where: { slug: restaurantSlug }
     });
-    if (!restaurant) throw ApiError.notFound('Restaurant not found');
+    if (!restaurant) throw ApiError.notFound('Order not found or details mismatch');
 
     const order = await prisma.order.findFirst({
       where: {
@@ -626,10 +629,21 @@ export const orderService = {
         id: true,
         status: true,
         createdAt: true,
+        customerPhone: true,
       },
     });
 
-    if (!order) throw ApiError.notFound('Order not found');
-    return order;
+    if (!order) throw ApiError.notFound('Order not found or details mismatch');
+
+    // Verify phone suffix if the order has a phone number
+    if (!order.customerPhone || !order.customerPhone.endsWith(customerPhoneSuffix)) {
+        throw ApiError.notFound('Order not found or details mismatch');
+    }
+
+    return {
+      id: order.id,
+      status: order.status,
+      createdAt: order.createdAt
+    };
   },
 };

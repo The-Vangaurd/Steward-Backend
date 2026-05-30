@@ -144,4 +144,16 @@ export const authController = {
 
     sendSuccess(res, HTTP_STATUS.OK, { message: 'Email verified successfully. You can now log in.' });
   }),
+
+  // ── New: forgot password ───────────────────────────────────────────────────
+  forgotPassword: asyncHandler(async (req: Request, res: Response) => {
+    await authService.forgotPassword(req.body);
+    sendSuccess(res, HTTP_STATUS.OK, { message: 'If an account exists, a reset link has been sent.' });
+  }),
+
+  // ── New: reset password ────────────────────────────────────────────────────
+  resetPassword: asyncHandler(async (req: Request, res: Response) => {
+    await authService.resetPassword(req.body);
+    sendSuccess(res, HTTP_STATUS.OK, { message: 'Password reset successfully. You can now log in.' });
+  }),
 };

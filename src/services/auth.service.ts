@@ -2,6 +2,7 @@ import * as bcrypt from 'bcryptjs';
 import { prisma } from '../config/database';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../utils/jwt';
 import { ApiError } from '../utils/ApiError';
+import crypto from 'crypto';
 import {
   RegisterInput,
   LoginInput,
@@ -178,7 +179,8 @@ export const authService = {
       });
       const refreshToken = signRefreshToken(result.user.id);
       const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-      await prisma.session.create({ data: { userId: result.user.id, refreshToken, expiresAt } });
+      const hashedToken = crypto.createHash('sha256').update(refreshToken).digest('hex');
+      await prisma.session.create({ data: { userId: result.user.id, refreshToken: hashedToken, expiresAt } });
 
       return {
         accessToken,
@@ -278,7 +280,8 @@ export const authService = {
     const refreshToken = signRefreshToken(user.id);
 
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-    await prisma.session.create({ data: { userId: user.id, refreshToken, expiresAt } });
+    const hashedToken = crypto.createHash('sha256').update(refreshToken).digest('hex');
+    await prisma.session.create({ data: { userId: user.id, refreshToken: hashedToken, expiresAt } });
 
     return {
       accessToken,
@@ -363,8 +366,9 @@ export const authService = {
     // Staff get a refresh token too so they stay logged in during a shift
     const refreshToken = signRefreshToken(matchedStaff.id);
     const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000); // 12-hour shift session
+    const hashedToken = crypto.createHash('sha256').update(refreshToken).digest('hex');
     await prisma.session.create({
-      data: { userId: matchedStaff.id, refreshToken, expiresAt },
+      data: { userId: matchedStaff.id, refreshToken: hashedToken, expiresAt },
     });
 
     return {
@@ -391,7 +395,8 @@ export const authService = {
     const payload = verifyRefreshToken(refreshToken);
     const targetUserId = payload.sub;
 
-    const session = await prisma.session.findUnique({ where: { refreshToken } });
+    const hashedInputToken = crypto.createHash('sha256').update(refreshToken).digest('hex');
+    const session = await prisma.session.findUnique({ where: { refreshToken: hashedInputToken } });
     if (!session || session.expiresAt < new Date()) {
       throw ApiError.unauthorized('Refresh token revoked or expired');
     }
@@ -408,16 +413,18 @@ export const authService = {
     });
 
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const newHashedToken = crypto.createHash('sha256').update(newRefreshToken).digest('hex');
     await prisma.$transaction([
-      prisma.session.delete({ where: { refreshToken } }),
-      prisma.session.create({ data: { userId: user.id, refreshToken: newRefreshToken, expiresAt } }),
+      prisma.session.delete({ where: { refreshToken: hashedInputToken } }),
+      prisma.session.create({ data: { userId: user.id, refreshToken: newHashedToken, expiresAt } }),
     ]);
 
     return { accessToken: newAccessToken, refreshToken: newRefreshToken };
   },
 
   async logout(refreshToken: string) {
-    await prisma.session.deleteMany({ where: { refreshToken } });
+    const hashedToken = crypto.createHash('sha256').update(refreshToken).digest('hex');
+    await prisma.session.deleteMany({ where: { refreshToken: hashedToken } });
   },
 
   async me(userId: string) {
@@ -430,5 +437,35 @@ export const authService = {
     });
     if (!user) throw ApiError.notFound('User not found');
     return user;
+  },
+
+  async forgotPassword({ email }: { email: string }) {
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user || !user.isActive) return;
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const { setPasswordResetToken, sendPasswordResetEmail } = require('../utils/passwordReset');
+
+    await setPasswordResetToken(user.email, token);
+    await sendPasswordResetEmail(user.email, token);
+  },
+
+  async resetPassword({ token, newPassword }: { token: string; newPassword: string }) {
+    const { getPasswordResetEmail, deletePasswordResetToken } = require('../utils/passwordReset');
+    const email = await getPasswordResetEmail(token);
+    
+    if (!email) throw ApiError.badRequest('Invalid or expired password reset token');
+
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) throw ApiError.badRequest('User not found');
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash },
+    });
+
+    await prisma.session.deleteMany({ where: { userId: user.id } });
+    await deletePasswordResetToken(token);
   },
 };

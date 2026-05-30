@@ -17,6 +17,14 @@ export const createOrderSchema = z.object({
   customerEmail: z.string().email().optional(),
   items: z.array(orderItemSchema).min(1, 'Order must have at least one item'),
   guestId: z.string().max(100).optional(),
+}).superRefine((data, ctx) => {
+  if (data.orderType === OrderType.DINE_IN && !data.tableNumber) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Table number is required for dine-in orders',
+      path: ['tableNumber'],
+    });
+  }
 });
 
 export const updateOrderStatusSchema = z.object({

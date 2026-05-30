@@ -5,7 +5,7 @@ import { parsePagination, buildPaginationMeta } from '../utils/pagination';
 import { UserRole } from '@prisma/client';
 import { SALT_ROUNDS } from '../constants';
 
-const TEMP_PASSWORD = 'Welcome@123';
+import crypto from 'crypto';
 
 const USER_SELECT = {
   id: true,
@@ -61,14 +61,15 @@ export const staffService = {
     const existing = await prisma.user.findUnique({ where: { email: data.email } });
     if (existing) throw ApiError.conflict('Email already registered', 'EMAIL_ALREADY_EXISTS');
 
-    const passwordHash = await bcrypt.hash(TEMP_PASSWORD, SALT_ROUNDS);
+    const temporaryPassword = crypto.randomBytes(6).toString('base64').replace(/\+/g, 'a').replace(/\//g, 'b').slice(0, 8);
+    const passwordHash = await bcrypt.hash(temporaryPassword, SALT_ROUNDS);
 
     const member = await prisma.user.create({
       data: { ...data, passwordHash, restaurantId },
       select: USER_SELECT,
     });
 
-    return { ...member, temporaryPassword: TEMP_PASSWORD };
+    return { ...member, temporaryPassword };
   },
 
   async updateStaffMember(restaurantId: string, staffId: string, data: {

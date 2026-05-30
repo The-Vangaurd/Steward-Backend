@@ -64,3 +64,19 @@ export const cancelRateLimiter = rateLimit({
     );
   },
 });
+
+export const lookupRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  store: buildStore('rl:lookup:'),
+  handler: (_req, res) => {
+    sendError(
+      res,
+      HTTP_STATUS.TOO_MANY_REQUESTS,
+      'Too many lookup attempts, please try again later',
+      'RATE_LIMIT_EXCEEDED',
+    );
+  },
+});

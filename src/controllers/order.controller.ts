@@ -19,13 +19,43 @@ export const orderController = {
   }),
 
   getOrderById: asyncHandler(async (req: Request, res: Response) => {
-    const order = await orderService.getOrderById(req.params.id);
-    sendSuccess(res, HTTP_STATUS.OK, order);
+    const { token } = req.query;
+    if (!token) throw ApiError.unauthorized('Missing recall token');
+
+    try {
+      const decoded = jwt.verify(token as string, env.JWT_GUEST_SECRET) as {
+        orderId?: string;
+        guestId: string;
+      };
+      const order = await orderService.getOrderById(req.params.id);
+      if (order.guestId !== decoded.guestId) {
+        throw ApiError.unauthorized('Unauthorized order access');
+      }
+      sendSuccess(res, HTTP_STATUS.OK, order);
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      throw ApiError.unauthorized('Invalid or expired recall token');
+    }
   }),
 
   trackOrder: asyncHandler(async (req: Request, res: Response) => {
-    const tracking = await orderService.getOrderTracking(req.params.id);
-    sendSuccess(res, HTTP_STATUS.OK, tracking);
+    const { token } = req.query;
+    if (!token) throw ApiError.unauthorized('Missing recall token');
+
+    try {
+      const decoded = jwt.verify(token as string, env.JWT_GUEST_SECRET) as {
+        orderId?: string;
+        guestId: string;
+      };
+      const tracking = await orderService.getOrderTracking(req.params.id);
+      if (tracking.guestId !== decoded.guestId) {
+        throw ApiError.unauthorized('Unauthorized order tracking access');
+      }
+      sendSuccess(res, HTTP_STATUS.OK, tracking);
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      throw ApiError.unauthorized('Invalid or expired recall token');
+    }
   }),
 
   // ── Kitchen ───────────────────────────────────────────────────────────────
@@ -111,9 +141,22 @@ export const orderController = {
   }),
 
   cancelGuestOrder: asyncHandler(async (req: Request, res: Response) => {
-    const { guestId } = req.body;
-    if (!guestId) {
-      throw ApiError.badRequest('Missing required body parameter: guestId');
+    const { token } = req.body;
+    if (!token || typeof token !== 'string') {
+      throw ApiError.badRequest('Missing required body parameter: token');
+    }
+
+    let guestId: string;
+    try {
+      const decoded = jwt.verify(token, env.JWT_GUEST_SECRET) as {
+        orderId?: string;
+        guestId: string;
+        restaurantSlug: string;
+      };
+      guestId = decoded.guestId;
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      throw ApiError.unauthorized('Invalid or expired recall token');
     }
 
     const updated = await orderService.cancelGuestOrder(req.params.id, guestId);
@@ -121,12 +164,16 @@ export const orderController = {
   }),
 
   lookupOrder: asyncHandler(async (req: Request, res: Response) => {
-    const { orderNumber, restaurantSlug } = req.query;
-    if (!orderNumber || !restaurantSlug) {
-      throw ApiError.badRequest('Missing required query parameters: orderNumber and restaurantSlug');
+    const { orderNumber, restaurantSlug, customerPhoneSuffix } = req.query;
+    if (!orderNumber || !restaurantSlug || !customerPhoneSuffix) {
+      throw ApiError.badRequest('Missing required query parameters');
     }
 
-    const order = await orderService.lookupOrder(orderNumber as string, restaurantSlug as string);
+    const order = await orderService.lookupOrder(
+        orderNumber as string,
+        restaurantSlug as string,
+        customerPhoneSuffix as string
+    );
     sendSuccess(res, HTTP_STATUS.OK, order);
   }),
 };

@@ -45,6 +45,11 @@ router.post('/logout', authController.logout);
 router.get('/me', authenticate, authController.me);
 router.get('/verify-email', authController.verifyEmail);
 
+// ── Password management ───────────────────────────────────────────────────
+import { forgotPasswordSchema, resetPasswordSchema } from '../validators/auth.validator';
+router.post('/forgot-password', authRateLimiter, validate(forgotPasswordSchema), authController.forgotPassword);
+router.post('/reset-password', authRateLimiter, validate(resetPasswordSchema), authController.resetPassword);
+
 // ── Google OAuth (mounted at /google and /google/callback) ────────────────
 router.use('/', oauthRouter);
 

@@ -24,7 +24,6 @@ const patchSchema = z.object({
   accentColor:        z.string().max(20).nullable().optional(),
   fontHeading:        z.string().max(100).nullable().optional(),
   fontBody:           z.string().max(100).nullable().optional(),
-  customCss:          z.string().max(50_000).nullable().optional(),
   openingHours:       z.unknown().optional(),
   offlineMode:        z.boolean().optional(),
   autoAcceptOrders:   z.boolean().optional(),

@@ -5,7 +5,6 @@ import { ApiError } from '../utils/ApiError';
 import { logger } from '../utils/logger';
 import { Decimal, InputJsonValue, JsonValue } from '@prisma/client/runtime/library';
 import { cloudinary, cloudinaryConfigured } from '../config/cloudinary';
-import { sanitizeCSS } from '../utils/cssUtils';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -17,7 +16,6 @@ export interface SettingsPatch {
   accentColor?: string | null;
   fontHeading?: string | null;
   fontBody?: string | null;
-  customCss?: string | null;
   openingHours?: InputJsonValue;
   offlineMode?: boolean;
   autoAcceptOrders?: boolean;
@@ -85,7 +83,6 @@ function buildCombinedSettings(
     accentColor: string | null;
     fontHeading: string | null;
     fontBody: string | null;
-    customCss: string | null;
     openingHours: JsonValue;
     offlineMode: boolean;
     autoAcceptOrders: boolean;
@@ -110,7 +107,6 @@ function buildCombinedSettings(
     accentColor: settings.accentColor,
     fontHeading: settings.fontHeading,
     fontBody: settings.fontBody,
-    customCss: settings.customCss,
     openingHours: settings.openingHours,
     offlineMode: settings.offlineMode,
     autoAcceptOrders: settings.autoAcceptOrders,
@@ -170,20 +166,16 @@ export const settingsService = {
     });
     if (!restaurant) throw ApiError.notFound('Restaurant not found');
 
-    const customCss = patch.customCss ? sanitizeCSS(patch.customCss) : patch.customCss;
-
     const updated = await prisma.restaurantSettings.upsert({
       where: { restaurantId },
       update: {
         ...patch,
-        customCss,
         taxRate: patch.taxRate !== undefined ? patch.taxRate / 100 : undefined,
         serviceCharge: patch.serviceCharge !== undefined ? patch.serviceCharge / 100 : undefined,
       },
       create: {
         ...patch,
         restaurantId,
-        customCss,
         taxRate: patch.taxRate !== undefined ? patch.taxRate / 100 : 0.05,
         serviceCharge: patch.serviceCharge !== undefined ? patch.serviceCharge / 100 : 0.00,
       },
@@ -345,7 +337,6 @@ export const settingsService = {
         accent: settings?.accentColor ?? null,
       },
       fontFamily: settings?.fontBody ?? settings?.fontHeading ?? null,
-      customCss: settings?.customCss ?? null,
       openingHours: settings?.openingHours ?? null,
       taxRate: settings ? Number(settings.taxRate) : 0.05,
       showCalories: settings?.showCalories ?? true,

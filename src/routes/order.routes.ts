@@ -9,7 +9,7 @@ import {
   orderQuerySchema,
 } from '../validators/order.validator';
 import { UserRole } from '@prisma/client';
-import { authRateLimiter, cancelRateLimiter } from '../middlewares/rateLimiter.middleware';
+import { authRateLimiter, cancelRateLimiter, lookupRateLimiter } from '../middlewares/rateLimiter.middleware';
 
 const router = Router();
 
@@ -33,7 +33,7 @@ router.get('/admin/list', ...adminGuard, validate(orderQuerySchema, 'query'), or
 // ── Public ────────────────────────────────────────────────────────────────────
 router.get('/guest/orders', orderController.getGuestOrders);
 router.get('/recall', orderController.recallOrders);
-router.get('/lookup', authRateLimiter, orderController.lookupOrder);
+router.get('/lookup', lookupRateLimiter, orderController.lookupOrder);
 router.post('/:id/cancel', cancelRateLimiter, orderController.cancelGuestOrder);
 router.get('/:id/track', orderController.trackOrder);
 router.get('/:id', orderController.getOrderById);
